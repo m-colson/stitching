@@ -1,0 +1,43 @@
+[proj]
+x = 0
+y = 0
+z = 0
+pitch = 0
+azimuth = 0
+fov = { W = 90 }
+ty.Projection.avg_colors = true
+
+[proj.ty.Projection.style.Spherical]
+radius = 50
+rev_face = false
+tan_correction = false
+dist_correction = false
+
+# Taken on Pixel 9 Pro Ultrawide Camera
+# (x, y, z) approximated in inches, (pitch, azimuth) approximated in degrees
+[[cameras]]
+x = 2.5
+y = 0
+z = -5
+pitch = 0
+azimuth = 140
+fov = { D = 123 }
+ty = { Image = "samples/right.jpg" }
+
+[[cameras]]
+x = -2.5
+y = 0
+z = -6
+pitch = 0
+azimuth = -140
+fov = { D = 123 }
+ty = { Image = "samples/left.jpg" }
+
+[[cameras]]
+x = 0
+y = -19
+z = -13
+pitch = 30
+azimuth = 0
+fov = { D = 123 }
+ty = { Image = "samples/front.jpg" }
