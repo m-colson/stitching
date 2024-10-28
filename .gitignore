@@ -3,3 +3,7 @@
 .direnv
 
 out.gif
+out.png
+flat.png
+
+**/*.grads.png

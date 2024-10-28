@@ -1,37 +1,110 @@
 use std::time::Instant;
 
-use camera::Camera;
+use clap::{Parser, Subcommand};
+use image::{GenericImageView, ImageBuffer, Luma};
 
-mod camera;
-mod config;
+use stitching::{camera::ProjectionStyle, config, grad, RenderState};
 
 #[cfg(feature = "raylib")]
 use std::sync::{Arc, Mutex};
 
-const WIDTH: usize = 1280;
-const HEIGHT: usize = 720;
+const WIDTH: usize = 1920;
+const HEIGHT: usize = 1080;
 
 fn main() {
+    let args = Args::parse();
+    args.run()
+}
+
+#[derive(Clone, Debug, Parser)]
+pub struct Args {
+    #[clap(subcommand)]
+    pub cmd: ArgCommand,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum ArgCommand {
     #[cfg(feature = "raylib")]
-    {
-        let (state, _watcher) = config::Config::open_state_watch("cams.toml").unwrap();
-        render_raylib(state, WIDTH, HEIGHT);
-    }
-
-    #[cfg(not(feature = "raylib"))]
-    {
-        let state = config::Config::open_state("cams.toml").unwrap();
-        render_gif(state, WIDTH, HEIGHT);
-    }
+    Window,
+    #[cfg(feature = "gif")]
+    Gif,
+    Png,
+    Flat,
+    Masks {
+        #[clap(long = "yt", default_value_t = 115)]
+        y_thresh: i32,
+        #[clap(long = "ct", default_value_t = 200.)]
+        c_thresh: f32,
+    },
+    Grads,
 }
 
-#[derive(Clone, Debug)]
-pub struct RenderState {
-    pub proj: Camera,
-    pub cams: Vec<Camera>,
-}
+impl Args {
+    pub fn run(&self) {
+        match self.cmd {
+            #[cfg(feature = "raylib")]
+            ArgCommand::Window => {
+                let (state, _watcher) = config::Config::open_state_watch("cams.toml").unwrap();
+                render_raylib(state, WIDTH, HEIGHT);
+            }
+            #[cfg(feature = "gif")]
+            ArgCommand::Gif => {
+                let state = config::Config::open_state("cams.toml").unwrap();
+                render_gif(state, 1280, 720);
+            }
+            ArgCommand::Png => {
+                let state = config::Config::open_state("cams.toml").unwrap();
+                render_png(state, 1280, 720);
+            }
+            ArgCommand::Flat => {
+                let state = config::Config::open_state("cams.toml").unwrap();
+                render_flat_img(state, WIDTH, WIDTH);
+            }
+            ArgCommand::Masks { y_thresh, c_thresh } => {
+                let cfg = config::Config::open("cams.toml").unwrap();
+                for c in cfg.cameras {
+                    let config::CameraTypeConfig::Image { path: img_path, .. } = c.ty else {
+                        panic!("camera is not an image type");
+                    };
 
-impl RenderState {}
+                    let img = image::open(&img_path).unwrap();
+                    let out_img = ImageBuffer::from_par_fn(img.width(), img.height(), |x, y| {
+                        let image::Rgba(p) = img.get_pixel(x, y);
+                        let p = p.map(|v| v as i32);
+
+                        let dg = [(0, 1), (1, 2), (2, 0)]
+                            .into_iter()
+                            .map(|(a, b)| (p[a] - p[b]).pow(2))
+                            .sum::<i32>() as f32;
+
+                        let y = (p[0] + p[1] + p[2]) / 3;
+                        Luma::from([if (y_thresh - y) as f32 * dg < c_thresh {
+                            0u8
+                        } else {
+                            255
+                        }])
+                    });
+
+                    out_img.save(img_path.with_extension("mask.png")).unwrap();
+                }
+            }
+            ArgCommand::Grads => {
+                let cfg = config::Config::open("cams.toml").unwrap();
+                for c in cfg.cameras {
+                    let config::CameraTypeConfig::Image { path: img_path, .. } = c.ty else {
+                        panic!("camera is not an image type");
+                    };
+                    println!("start {:?}", img_path);
+                    let img = image::open(&img_path).unwrap().to_rgb8();
+                    let img = grad::guass_filter(&img, 2.5);
+                    let img = grad::gradients(&img);
+
+                    img.save(img_path.with_extension("grads.png")).unwrap();
+                }
+            }
+        }
+    }
+}
 
 #[cfg(feature = "raylib")]
 fn render_raylib(state: Arc<Mutex<RenderState>>, width: usize, height: usize) {
@@ -154,11 +227,11 @@ fn check_keys(rl: &raylib::RaylibHandle, state: &mut RenderState, dt: f32) -> bo
     let mut changed = false;
 
     if rl.is_key_down(ffi::KeyboardKey::KEY_UP) && state.proj.pitch > -PI / 2. + 1e-1 {
-        state.proj.pitch -= dt;
+        state.proj.pitch += dt;
         changed = true;
     }
     if rl.is_key_down(ffi::KeyboardKey::KEY_DOWN) && state.proj.pitch < PI / 2. - 1e-1 {
-        state.proj.pitch += dt;
+        state.proj.pitch -= dt;
         changed = true;
     }
     if rl.is_key_down(ffi::KeyboardKey::KEY_LEFT) {
@@ -192,11 +265,11 @@ fn check_keys(rl: &raylib::RaylibHandle, state: &mut RenderState, dt: f32) -> bo
 
     let mut move_up = 0.;
     if rl.is_key_down(ffi::KeyboardKey::KEY_SPACE) {
-        move_up -= dt;
+        move_up += dt;
         changed = true;
     }
     if rl.is_key_down(ffi::KeyboardKey::KEY_LEFT_CONTROL) {
-        move_up += dt;
+        move_up -= dt;
         changed = true;
     }
 
@@ -210,7 +283,7 @@ fn check_keys(rl: &raylib::RaylibHandle, state: &mut RenderState, dt: f32) -> bo
     changed
 }
 
-#[cfg(not(feature = "raylib"))]
+#[cfg(feature = "gif")]
 fn render_gif(mut state: RenderState, width: usize, height: usize) {
     use std::fs;
 
@@ -236,7 +309,7 @@ fn render_gif(mut state: RenderState, width: usize, height: usize) {
     .unwrap();
 
     let mut frame_buf = vec![0u8; width * height * 3];
-    for r in (0..360).step_by(3) {
+    for r in (0..360).step_by(1) {
         state.proj.azimuth = (r as f32).to_radians();
         time_op(&format!("project {r}"), || {
             state
@@ -252,4 +325,44 @@ fn render_gif(mut state: RenderState, width: usize, height: usize) {
 
         frame_buf.fill(0);
     }
+}
+
+fn render_png(state: RenderState, width: usize, height: usize) {
+    let mut frame_buf = vec![0u8; width * height * 3];
+    state
+        .proj
+        .project_into(width, height, &state.cams, &mut frame_buf);
+
+    image::ImageBuffer::<image::Rgb<_>, _>::from_vec(width as u32, height as u32, frame_buf)
+        .unwrap()
+        .save("out.png")
+        .unwrap();
+}
+
+fn render_flat_img(state: RenderState, width: usize, height: usize) {
+    let cams = state.cams.as_slice();
+    let cz = 100.;
+    let ax = 0.03;
+    let ay = (ax / width as f32) * height as f32;
+
+    let out = image::RgbImage::from_par_fn(width as u32, height as u32, |x, y| {
+        let x = (x as f32 - (width as f32) / 2.) * ax;
+        let y = -(y as f32 - (height as f32) / 2.) * ay;
+        let (xi, yi, zi) = ((x * ax).sin() * cz, (y * ay).sin() * cz, 0.);
+        let (_, p) = cams
+            .iter()
+            .filter_map(|c| {
+                let (dx, dy, dz) = (xi - c.x, yi - c.y, zi - c.z);
+                Some((
+                    dx * dx + dy * dy + dz * dz,
+                    ProjectionStyle::Hemisphere { radius: 0. }.proj_back(c, (xi, yi, zi))?,
+                ))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .unwrap_or_default();
+
+        image::Rgb(p)
+    });
+
+    out.save("flat.png").unwrap();
 }

@@ -75,16 +75,26 @@ pub struct CameraConfig {
     pub z: f32,
     pub pitch: f32,
     pub azimuth: f32,
+    #[serde(default)]
+    pub roll: f32,
     pub fov: CameraFov,
     pub ty: CameraTypeConfig,
 }
 
 impl CameraConfig {
     pub fn load(&self) -> Result<Camera, CameraError> {
-        let mut out = Camera::new((self.x, self.y, self.z), self.pitch, self.azimuth, self.fov);
+        let mut out = Camera::new(
+            (self.x, self.y, self.z),
+            self.pitch,
+            self.azimuth,
+            self.roll,
+            self.fov,
+        );
 
         match &self.ty {
-            CameraTypeConfig::Image(p) => out.with_image(p),
+            CameraTypeConfig::Image { path, mask_path } => {
+                out.with_image(path, mask_path.as_deref())
+            }
             CameraTypeConfig::Projection { style, avg_colors } => {
                 out.project_settings(style.clone(), *avg_colors);
                 Ok(out)
@@ -95,7 +105,10 @@ impl CameraConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum CameraTypeConfig {
-    Image(PathBuf),
+    Image {
+        path: PathBuf,
+        mask_path: Option<PathBuf>,
+    },
     Projection {
         style: ProjectionStyle,
         avg_colors: bool,

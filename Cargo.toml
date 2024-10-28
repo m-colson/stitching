@@ -4,16 +4,19 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["raylib"]
+default = ["raylib", "gif"]
 raylib = ["dep:raylib"]
+gif = ["dep:gif"]
 
 [dependencies]
-gif = "0.13.1"
+clap = { version = "4.5.20", features = ["derive"] }
+gif = { version = "0.13.1", optional = true }
 image = { version = "0.25.2", default-features = false, features = [
     "jpeg",
     "png",
     "rayon",
 ] }
+itertools = "0.13.0"
 notify = { version = "6.1.1", default-features = false }
 raylib = { version = "5.0.2", optional = true }
 rayon = "1.10.0"
