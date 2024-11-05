@@ -7,6 +7,7 @@ let
     xorgPkgs = with pkgs.xorg; [
         libX11 libXrandr libXinerama libXcursor libXi
     ];
+    unstablePkgs = import <unstable> {};
 in with pkgs; mkShell {
     buildInputs = [
         openssl
@@ -17,7 +18,7 @@ in with pkgs; mkShell {
         
         rust-bin.stable.latest.default
 
-        rust-analyzer
+        unstablePkgs.rust-analyzer
     ] ++ xorgPkgs;
 
     LD_LIBRARY_PATH = lib.makeLibraryPath ([

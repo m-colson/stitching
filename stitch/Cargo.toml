@@ -1,0 +1,21 @@
+[package]
+name = "stitch"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["image", "toml-cfg", "watch"]
+image = ["dep:image"]
+toml-cfg = ["dep:toml"]
+watch = ["dep:notify"]
+
+[dependencies]
+image = { version = "0.25.4", default-features = false, features = [
+    "png",
+    "jpeg",
+], optional = true }
+notify = { version = "7.0.0", optional = true }
+rayon = "1.10.0"
+serde = { version = "1.0.214", features = ["derive"] }
+thiserror = "1.0.67"
+toml = { version = "0.8.19", optional = true }

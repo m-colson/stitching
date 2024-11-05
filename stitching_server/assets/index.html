@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>CASA Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <script>
+        class ProjectionView extends HTMLCanvasElement {
+            /**@type WebSocket*/
+            conn;
+            /**@type CanvasRenderingContext2D */
+            ctx;
+            /**@type ImageData*/
+            currData;
+
+            constructor() {
+                super();
+            }
+
+            connectedCallback() {
+                this.conn = new WebSocket("/video");
+                this.conn.addEventListener("message", this.handleMessage);
+                this.conn.addEventListener("close", this.handleClose);
+
+                this.ctx = this.getContext("2d");
+                this.currData = this.ctx.createImageData(this.width, this.height);
+            }
+
+            disconnectedCallback() {
+                this.conn.close(1000, "disconnecting");
+                console.log("Custom element removed from page.");
+            }
+
+            adoptedCallback() {
+                console.log("Custom element moved to new page.");
+            }
+
+            handleMessage(ev) {
+                console.log(ev);
+            }
+
+            handleClose(ev) {
+                console.log(ev);
+            }
+
+            syncView() {
+                this.ctx.putImageData(this.currData, 0, 0)
+            }
+        }
+
+        customElements.define("projection-view", ProjectionView, { extends: "canvas" })
+    </script>
+</head>
+
+<body>
+    <canvas is="projection-view" id="imgview" width="1080" height="720"></canvas>
+</body>
+
+</html>

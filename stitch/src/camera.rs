@@ -1,103 +1,86 @@
-use std::{f32::consts::PI, path::Path, sync::Arc};
+use std::f32::consts::PI;
 
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use serde::{Deserialize, Serialize};
 
+use crate::{
+    config::{CameraConfig, CameraType},
+    frame::FrameBuffer,
+};
+
 #[derive(Clone, Debug)]
-pub struct Camera {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub pitch: f32,
-    pub azimuth: f32,
-    pub roll: f32,
-    pub fov: CameraFov,
-    pub ty: CameraType,
+pub struct Camera<T: FrameBuffer> {
+    pub cfg: CameraConfig,
+    pub buf: T,
 }
 
-impl Camera {
-    pub fn new(
-        (x, y, z): (f32, f32, f32),
-        pitch: f32,
-        azimuth: f32,
-        roll: f32,
-        fov: CameraFov,
-    ) -> Self {
+impl<T: FrameBuffer + Default> Camera<T> {
+    pub fn new(cfg: CameraConfig) -> Self {
         Self {
-            x,
-            y,
-            z,
-            pitch: pitch.to_radians(),
-            azimuth: azimuth.to_radians(),
-            roll: roll.to_radians(),
-            fov,
-            ty: CameraType::None,
+            cfg,
+            buf: T::default(),
         }
     }
+}
 
-    pub fn with_image(
-        mut self,
-        path: impl AsRef<Path>,
-        mask_path: Option<&Path>,
-    ) -> Result<Self, CameraError> {
-        self.load_image(path, mask_path)?;
-        Ok(self)
-    }
+impl<T: FrameBuffer + std::marker::Sync> Camera<T> {
+    // pub fn with_image(
+    //     mut self,
+    //     path: impl AsRef<Path>,
+    //     mask_path: Option<&Path>,
+    // ) -> Result<Self, CameraError> {
+    //     self.load_image(path, mask_path)?;
+    //     Ok(self)
+    // }
 
-    pub fn load_image(
-        &mut self,
-        path: impl AsRef<Path>,
-        mask_path: Option<&Path>,
-    ) -> Result<(), CameraError> {
-        let dyn_img = image::open(path)?;
-        let rgb_img = dyn_img.to_rgb8();
-        let img_width = rgb_img.width();
-        let img_height = rgb_img.height();
+    // pub fn load_image(
+    //     &mut self,
+    //     path: impl AsRef<Path>,
+    //     mask_path: Option<&Path>,
+    // ) -> Result<(), CameraError> {
+    //     let dec = image::ImageReader::open(path)?.into_decoder()?;
+    //     let (img_width, img_height) = dec.dimensions();
 
-        self.ty = CameraType::Image {
-            data: image::ImageBuffer::from_raw(img_width, img_height, rgb_img.into_raw().into())
-                .unwrap(),
-            mask: mask_path.map(|mp| {
-                let img = image::open(mp).unwrap().to_luma8();
-                image::ImageBuffer::from_raw(img_width, img_height, img.into_raw().into()).unwrap()
-            }),
-        };
-        self.fov = self
-            .fov
-            .with_aspect(dyn_img.width() as f32, dyn_img.height() as f32);
-        Ok(())
-    }
+    //     self.ty = CameraType::Image {
+    //         data: image::ImageBuffer::from_raw(img_width, img_height, rgb_img.into_raw().into())
+    //             .unwrap(),
+    //         mask: mask_path.map(|mp| {
+    //             let img = image::open(mp).unwrap().to_luma8();
+    //             image::ImageBuffer::from_raw(img_width, img_height, img.into_raw().into()).unwrap()
+    //         }),
+    //     };
+    //     self.fov = self
+    //         .fov
+    //         .with_aspect(dyn_img.width() as f32, dyn_img.height() as f32);
+    //     Ok(())
+    // }
 
-    pub fn project_settings(&mut self, style: ProjectionStyle, avg_colors: bool) {
-        if self.azimuth < 0. {
-            self.azimuth += 2. * PI;
-        }
-        if self.azimuth > 2. * PI {
-            self.azimuth -= 2. * PI;
-        }
+    pub fn project_into<CB: FrameBuffer + std::marker::Sync>(&mut self, others: &[Camera<CB>]) {
+        let cfg = &self.cfg;
 
-        self.ty = CameraType::Projection { style, avg_colors };
-    }
-
-    pub fn project_into(&self, width: usize, height: usize, others: &[Self], out: &mut [u8]) {
-        use rayon::prelude::*;
-
-        let CameraType::Projection { style, avg_colors } = &self.ty else {
+        let CameraType::Projection { style, avg_colors } = cfg.ty else {
             panic!("can't project with a non projection camera");
         };
 
-        let mut new_self = self.clone();
-        new_self.fov = self.fov.with_aspect(width as f32, height as f32);
+        let width = self.buf.width();
+        let height = self.buf.height();
+        let chans = self.buf.chans();
 
-        out.par_chunks_mut(width * 3)
+        self.buf
+            .as_bytes_mut()
+            .par_chunks_mut(width * chans)
             .enumerate()
             .for_each(|(sy, row)| {
-                row.chunks_mut(3).enumerate().for_each(|(sx, p)| {
+                row.chunks_mut(chans).enumerate().for_each(|(sx, p)| {
                     let sx = sx as f32 / width as f32 - 0.5;
                     let sy = sy as f32 / height as f32 - 0.5;
-                    let (xi, yi, zi) = style.proj_forw(&new_self, sx, sy);
+                    let (xi, yi, zi) = style.proj_forw(cfg, sx, sy);
 
-                    if *avg_colors {
-                        let mut c_sum = [0., 0., 0.];
+                    if avg_colors {
+                        let mut c_sum = [0f32, 0., 0.];
                         let mut c_count = 0;
 
                         others
@@ -127,7 +110,7 @@ impl Camera {
                         let Some((_, best_p)) = others
                             .iter()
                             .filter_map(|c| {
-                                let (dx, dy, dz) = (xi - c.x, yi - c.y, zi - c.z);
+                                let (dx, dy, dz) = (xi - c.cfg.x, yi - c.cfg.y, zi - c.cfg.z);
                                 Some((
                                     dx * dx + dy * dy + dz * dz,
                                     style.proj_back(c, (xi, yi, zi))?,
@@ -138,34 +121,49 @@ impl Camera {
                             return;
                         };
 
-                        p.copy_from_slice(&best_p);
+                        p.copy_from_slice(best_p);
                     }
                 });
             });
     }
+}
 
-    pub fn at(&self, x: f32, y: f32) -> Option<[u8; 3]> {
+impl<T: FrameBuffer> Camera<T> {
+    pub fn at(&self, x: f32, y: f32) -> Option<&[u8]> {
         let x = x + 0.5;
         let y = y + 0.5;
         if !(0.0..1.).contains(&x) || !(0.0..1.).contains(&y) {
             return None;
         }
 
-        match &self.ty {
-            CameraType::Image { data, mask } => {
-                let sx = (x * data.width() as f32) as u32;
-                let sy = (y * data.height() as f32) as u32;
+        let width = self.width();
+        let height = self.height();
+        let chans = self.chans();
+        println!("{width}x{height}x{chans}");
 
-                if let Some(mask) = mask {
-                    if mask.get_pixel(sx, sy).0[0] == 0 {
-                        return None;
-                    }
-                }
+        let sx = (x * width as f32) as usize;
+        let sy = (y * height as f32) as usize;
 
-                Some(data.get_pixel(sx, sy).0)
-            }
-            t => unimplemented!("Camera::at() on {t:?}"),
-        }
+        // if let Some(mask) = mask {
+        //     if mask.get_pixel(sx, sy).0[0] == 0 {
+        //         return None;
+        //     }
+        // }
+
+        Some(&self.buf.as_bytes()[(sx + (sy * width)) * chans..][..chans])
+    }
+
+    #[inline]
+    pub fn width(&self) -> usize {
+        self.buf.width()
+    }
+    #[inline]
+    pub fn height(&self) -> usize {
+        self.buf.height()
+    }
+    #[inline]
+    pub fn chans(&self) -> usize {
+        self.buf.chans()
     }
 }
 
@@ -177,27 +175,6 @@ fn clamp_pi(v: f32) -> f32 {
         let rots = (v / (2. * PI)).round();
         v - rots * 2. * PI
     }
-}
-
-#[derive(Clone, Debug)]
-pub enum CameraType {
-    None,
-    Image {
-        data: image::ImageBuffer<image::Rgb<u8>, Arc<[u8]>>,
-        mask: Option<image::ImageBuffer<image::Luma<u8>, Arc<[u8]>>>,
-    },
-    Projection {
-        style: ProjectionStyle,
-        avg_colors: bool,
-    },
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum CameraError {
-    #[error("image error: {0}")]
-    Image(#[from] image::ImageError),
-    #[error("image cast ")]
-    ImageCastFailure,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -229,13 +206,13 @@ impl CameraFov {
 
     pub fn radians(self) -> (f32, f32) {
         let Self::WHRadians(x, y) = self else {
-            panic!("can't get radians of CameraFov::W, CameraFov::H, or CameraFov::D");
+            panic!("can't get radians of {self:?}");
         };
         (x, y)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ProjectionStyle {
     Spherical {
         radius: f32,
@@ -249,22 +226,22 @@ pub enum ProjectionStyle {
 }
 
 impl ProjectionStyle {
-    pub fn proj_forw(&self, cam: &Camera, sx: f32, sy: f32) -> (f32, f32, f32) {
+    pub fn proj_forw(&self, cfg: &CameraConfig, sx: f32, sy: f32) -> (f32, f32, f32) {
         match self {
             ProjectionStyle::Spherical {
                 radius, rev_face, ..
             } => {
-                let (fx, fy) = cam.fov.radians();
+                let (fx, fy) = cfg.fov.radians();
 
                 let (bound_az, bound_pitch) = if *rev_face {
                     (
-                        clamp_pi(cam.azimuth + fx * sx + PI),
-                        clamp_pi(-cam.pitch - fy * sy + PI),
+                        clamp_pi(cfg.azimuth + fx * sx + PI),
+                        clamp_pi(-cfg.pitch - fy * sy + PI),
                     )
                 } else {
                     (
-                        clamp_pi(cam.azimuth + fx * sx),
-                        clamp_pi(cam.pitch + fy * sy),
+                        clamp_pi(cfg.azimuth + fx * sx),
+                        clamp_pi(cfg.pitch + fy * sy),
                     )
                 };
 
@@ -272,30 +249,30 @@ impl ProjectionStyle {
             }
             ProjectionStyle::Hemisphere { radius } => {
                 let r = *radius;
-                let (fx, fy) = cam.fov.radians();
+                let (fx, fy) = cfg.fov.radians();
 
                 let (bound_az, bound_pitch) = (
-                    clamp_pi(cam.azimuth + fx * sx),
-                    clamp_pi(cam.pitch - fy * sy),
+                    clamp_pi(cfg.azimuth + fx * sx),
+                    clamp_pi(cfg.pitch - fy * sy),
                 );
 
                 let (z, mag_xy) = {
                     let p_cot = bound_pitch.cos() / bound_pitch.sin();
-                    let cam_xy = (cam.x.powi(2) + cam.y.powi(2)).sqrt();
-                    let xy_plane_dist = -cam.z * p_cot + cam_xy;
+                    let cam_xy = (cfg.x.powi(2) + cfg.y.powi(2)).sqrt();
+                    let xy_plane_dist = -cfg.z * p_cot + cam_xy;
 
                     if bound_pitch.abs() < 1e-4 {
-                        (cam.z, (r.powi(2) - cam.z.powi(2)).sqrt())
+                        (cfg.z, (r.powi(2) - cfg.z.powi(2)).sqrt())
                     } else if xy_plane_dist > 0. && xy_plane_dist < r {
                         (0., xy_plane_dist)
                     } else {
                         let p2 = p_cot.powi(2);
                         let p2_1 = p2 + 1.;
 
-                        let det_sqrt = (r.powi(2) * p2_1 - (cam_xy - cam.z * p_cot).powi(2)).sqrt();
+                        let det_sqrt = (r.powi(2) * p2_1 - (cam_xy - cfg.z * p_cot).powi(2)).sqrt();
 
                         let z =
-                            (bound_pitch.signum() * det_sqrt - p_cot * cam_xy + p2 * cam.z) / p2_1;
+                            (bound_pitch.signum() * det_sqrt - p_cot * cam_xy + p2 * cfg.z) / p2_1;
 
                         (z, (r.powi(2) - z.powi(2)).sqrt())
                     }
@@ -308,7 +285,12 @@ impl ProjectionStyle {
         }
     }
 
-    pub fn proj_back(&self, c: &Camera, (xi, yi, zi): (f32, f32, f32)) -> Option<[u8; 3]> {
+    pub fn proj_back<'a, B: FrameBuffer>(
+        &self,
+        cam: &'a Camera<B>,
+        (xi, yi, zi): (f32, f32, f32),
+    ) -> Option<&'a [u8]> {
+        let cfg = &cam.cfg;
         match self {
             ProjectionStyle::Spherical {
                 radius,
@@ -316,17 +298,17 @@ impl ProjectionStyle {
                 dist_correction,
                 ..
             } => {
-                let (revx, revy, revz) = (xi - c.x, yi - c.y, zi - c.z);
+                let (revx, revy, revz) = (xi - cfg.x, yi - cfg.y, zi - cfg.z);
                 let rev = SphereCoord::from_cart(revx, revy, revz);
 
                 if xi * revx + yi * revy + zi * revz < 0. {
                     return None;
                 }
 
-                let azimuth = clamp_pi(rev.theta - c.azimuth);
-                let pitch = rev.phi - c.pitch;
+                let azimuth = clamp_pi(rev.theta - cfg.azimuth);
+                let pitch = rev.phi - cfg.pitch;
 
-                let (fx, fy) = c.fov.radians();
+                let (fx, fy) = cfg.fov.radians();
                 let (mut cx, mut cy) = if *tan_correction {
                     let (ax, ay) = ((fx / 2.).tan(), (fy / 2.).tan());
                     (0.5 * azimuth.tan() / ax, 0.5 * pitch.tan() / ay)
@@ -340,10 +322,10 @@ impl ProjectionStyle {
                     cy *= factor;
                 }
 
-                c.at(cx, cy)
+                cam.at(cx, cy)
             }
             ProjectionStyle::Hemisphere { .. } => {
-                let (revx, revy, revz) = (xi - c.x, yi - c.y, zi - c.z);
+                let (revx, revy, revz) = (xi - cfg.x, yi - cfg.y, zi - cfg.z);
                 // dot product to ensure points are only projected when the are semi parallel to the camera.
                 if (xi * revx + yi * revy + zi * revz) < 0. {
                     return None;
@@ -351,20 +333,20 @@ impl ProjectionStyle {
 
                 let rev = SphereCoord::from_cart(revx, revy, revz);
 
-                let mut azimuth = clamp_pi(rev.theta - c.azimuth);
-                let mut pitch = rev.phi - c.pitch;
+                let mut azimuth = clamp_pi(rev.theta - cfg.azimuth);
+                let mut pitch = rev.phi - cfg.pitch;
 
-                if c.roll != 0. {
+                if cfg.roll != 0. {
                     let loc_mag = (azimuth.powi(2) + pitch.powi(2)).sqrt();
-                    let loc_dir = pitch.atan2(azimuth) - c.roll;
+                    let loc_dir = pitch.atan2(azimuth) - cfg.roll;
                     azimuth = loc_mag * loc_dir.cos();
                     pitch = loc_mag * loc_dir.sin();
                 }
 
-                let (fx, fy) = c.fov.radians();
+                let (fx, fy) = cfg.fov.radians();
                 let (cx, cy) = (azimuth / fx, pitch / fy);
 
-                c.at(cx, -cy)
+                cam.at(cx, -cy)
             }
         }
     }
