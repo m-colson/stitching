@@ -7,8 +7,11 @@
     <link rel="stylesheet" href="../static/style.css"> <!-- Updated path -->
     <script>
         class ProjectionView extends HTMLCanvasElement {
+            /**@type WebSocket*/
             conn;
+            /**@type CanvasRenderingContext2D */
             ctx;
+            /**@type ImageData*/
             currData;
 
             constructor() {
@@ -17,6 +20,7 @@
 
             connectedCallback() {
                 this.conn = new WebSocket("/video");
+                this.conn.binaryType = "arraybuffer";
                 this.conn.addEventListener("message", this.handleMessage.bind(this));
                 this.conn.addEventListener("close", this.handleClose.bind(this));
 
@@ -29,12 +33,21 @@
                 console.log("Custom element removed from page.");
             }
 
+            /**
+             * @param {MessageEvent<any>} ev
+             */
             handleMessage(ev) {
-                const data = new Uint8ClampedArray(ev.data);
-                this.currData.data.set(data);
-                this.syncView();
+                if (ev.data instanceof ArrayBuffer) {
+                    this.currData.data.set(ev.data.slice(8));
+                    this.syncView();
+                } else {
+                    console.error("unhandled data type for message", ev)
+                }
             }
 
+            /**
+             * @param {CloseEvent} ev
+             */
             handleClose(ev) {
                 console.log("WebSocket connection closed:", ev);
             }
@@ -53,7 +66,7 @@
         <h1>Camera for Situation Awareness</h1>
 
         <div class="panorama">
-            <canvas is="projection-view" id="imgview" width="1080" height="720"></canvas>
+            <canvas is="projection-view" id="imgview" width="1280" height="720"></canvas>
         </div>
 
         <div class="view-selector">
