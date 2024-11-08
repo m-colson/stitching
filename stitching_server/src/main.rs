@@ -1,9 +1,7 @@
-use std::{fmt::Debug, path::Path, sync::Arc};
+use app::App;
+use clap::{Parser, Subcommand};
 
-use stitch::{ConfigError, RenderState, StaticFrameBuffer};
-use tokio::net::{TcpListener, ToSocketAddrs};
-
-mod routes;
+mod app;
 mod util;
 
 mod log;
@@ -15,40 +13,43 @@ pub async fn main() {
         env!("CARGO_CRATE_NAME")
     ));
 
-    AppState::<1080, 720>::from_toml_cfg("cams.toml")
-        .unwrap()
-        .listen_and_serve("0.0.0.0:2780")
-        .await
-        .unwrap();
+    Args::parse().run().await
 }
 
-#[derive(Clone, Debug)]
-pub struct AppState<const W: usize, const H: usize> {
-    pub rend: Arc<RenderState<Box<StaticFrameBuffer<W, H>>>>,
+#[derive(Clone, Debug, Parser)]
+pub struct Args {
+    #[clap(subcommand)]
+    pub cmd: ArgCommand,
 }
 
-impl<const W: usize, const H: usize> AppState<W, H> {
-    pub fn from_toml_cfg(p: impl AsRef<Path>) -> Result<Self, ConfigError> {
-        let cfg = stitch::Config::open(p)?;
-
-        let proj = cfg.proj.load_heaped()?;
-
-        let cams = cfg
-            .cameras
-            .iter()
-            .map(|c| c.clone().load_sized())
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // SAFETY: all fields of `RenderState` are initialized if we get here.
-        Ok(Self {
-            rend: Arc::new(RenderState { proj, cams }),
-        })
+impl Args {
+    pub async fn run(self) {
+        match self.cmd {
+            ArgCommand::Serve => {
+                App::from_toml_cfg("live.toml", 1280, 720)
+                    .await
+                    .unwrap()
+                    .listen_and_serve("0.0.0.0:2780")
+                    .await
+                    .unwrap();
+            }
+            ArgCommand::ListLive => {
+                let cams = nokhwa::query(nokhwa::native_api_backend().unwrap()).unwrap();
+                for c in cams {
+                    println!(
+                        "{} -> {:?} ({:?})",
+                        c.index(),
+                        c.human_name(),
+                        c.description()
+                    );
+                }
+            }
+        }
     }
+}
 
-    pub async fn listen_and_serve(self, a: impl ToSocketAddrs + Debug) -> std::io::Result<()> {
-        let bind = TcpListener::bind(&a).await?;
-        tracing::info!("listening on {a:?}");
-
-        axum::serve(bind, routes::router(self)).await
-    }
+#[derive(Clone, Debug, Subcommand)]
+pub enum ArgCommand {
+    Serve,
+    ListLive,
 }

@@ -4,18 +4,27 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["image", "toml-cfg", "watch"]
-image = ["dep:image"]
+default = ["toml-cfg", "watch", "tokio", "live"]
 toml-cfg = ["dep:toml"]
 watch = ["dep:notify"]
+tokio = ["dep:tokio"]
+live = ["dep:nokhwa", "dep:zerocopy", "tokio", "tokio/rt"]
 
 [dependencies]
+futures = "0.3.31"
 image = { version = "0.25.4", default-features = false, features = [
     "png",
     "jpeg",
-], optional = true }
+] }
+itertools = "0.13.0"
+nokhwa = { version = "0.10.5", optional = true, features = [
+    "input-native",
+    "output-threaded",
+] }
 notify = { version = "7.0.0", optional = true }
 rayon = "1.10.0"
 serde = { version = "1.0.214", features = ["derive"] }
 thiserror = "1.0.67"
+tokio = { version = "1.41.0", optional = true, features = ["sync"] }
 toml = { version = "0.8.19", optional = true }
+zerocopy = { version = "0.8.9", optional = true, features = ["alloc"] }

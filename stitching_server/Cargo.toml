@@ -12,10 +12,16 @@ axum = { version = "0.7.7", default-features = false, features = [
     "ws",
 ] }
 axum-extra = { version = "0.9.4", features = ["typed-header", "tracing"] }
-clap = { version = "4.5.20", default-features = false, features = ["derive", "std"] }
+clap = { version = "4.5.20", default-features = false, features = [
+    "derive",
+    "std",
+] }
+futures = "0.3.31"
 futures-util = "0.3.31"
-stitch = { version = "0.1.0", path = "../stitch" }
+nokhwa = { version = "0.10.5", features = ["input-native"] }
+stitch = { version = "0.1.0", path = "../stitch", features = ["tokio"] }
 tokio = { version = "1.41.0", features = ["rt-multi-thread"] }
 tower-http = { version = "0.6.1", features = ["fs", "trace"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+zerocopy = { version = "0.8.9", features = ["alloc"] }

@@ -96,8 +96,8 @@ pub fn gradients(
         step_x /= step_divider;
         step_y /= step_divider;
 
-        let mut x = start_x as f32;
-        let mut y = start_y as f32;
+        let mut x = start_x;
+        let mut y = start_y;
         while x >= 0. && x < width as f32 && y >= 0. && y < height as f32 {
             let off = (x as usize + y as usize * width) * 3;
             for (i, c) in l.conf.iter().enumerate() {
@@ -108,8 +108,8 @@ pub fn gradients(
             y += step_y;
         }
 
-        x = start_x as f32 - step_x;
-        y = start_y as f32 - step_y;
+        x = start_x - step_x;
+        y = start_y - step_y;
         while x >= 0. && x < width as f32 && y >= 0. && y < height as f32 {
             let off = (x as usize + y as usize * width) * 3;
             for (i, c) in l.conf.iter().enumerate() {

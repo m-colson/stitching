@@ -46,15 +46,15 @@ impl<const N: usize> EdgeLine<N> {
         }
     }
 
-    pub fn to_cart(&self) -> (f32, f32) {
+    pub fn to_cart(self) -> (f32, f32) {
         (self.r * self.ang.cos(), self.r * self.ang.sin())
     }
 
-    pub fn total_conf(&self) -> f32 {
+    pub fn total_conf(self) -> f32 {
         self.conf.iter().sum()
     }
 
-    fn bucket(&self) -> EdgeBucket {
+    fn bucket(self) -> EdgeBucket {
         // let r = self.r + self.r.signum() * EdgeBucket::COORD_BUCKET_DIV * 2.;
         // let x = r * self.ang.cos() / EdgeBucket::COORD_BUCKET_DIV;
         // let y = r * self.ang.sin() / EdgeBucket::COORD_BUCKET_DIV;
@@ -67,7 +67,7 @@ impl<const N: usize> EdgeLine<N> {
         }
     }
 
-    pub fn bucketize(&self) -> Self {
+    pub fn bucketize(self) -> Self {
         let b = self.bucket();
         // let x = b.x as f32 * EdgeBucket::COORD_BUCKET_DIV;
         // let y = b.y as f32 * EdgeBucket::COORD_BUCKET_DIV;
@@ -75,7 +75,7 @@ impl<const N: usize> EdgeLine<N> {
         // let ang = (y as f32).atan2(x as f32);
         let r = b.r as f32;
         Self {
-            r: ((r as f32) * EdgeBucket::R_BUCKET_DIV) as _,
+            r: (r * EdgeBucket::R_BUCKET_DIV) as _,
             ang: (b.ang as f32 / EdgeBucket::ANG_BUCKET_MUL).to_radians() as _,
             // r,
             // ang,

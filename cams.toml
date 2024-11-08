@@ -5,12 +5,8 @@ z = 4
 pitch = 0
 azimuth = 0
 fov = { H = 80 }
-
-[proj.ty.Projection]
 avg_colors = false
-
-[proj.ty.Projection.style.Hemisphere]
-radius = 100
+style = { Hemisphere = { radius = 100 } }
 
 [[cameras]]
 x = 0
@@ -20,8 +16,6 @@ pitch = -2.1
 azimuth = 0
 roll = 0
 fov = { W = 123 }
-
-[cameras.ty.Image]
 path = "samples/4s/f.jpg"
 
 [[cameras]]
@@ -32,8 +26,6 @@ pitch = -0.9
 azimuth = 91
 roll = -0.2
 fov = { W = 123 }
-
-[cameras.ty.Image]
 path = "samples/4s/r.jpg"
 
 [[cameras]]
@@ -44,8 +36,6 @@ pitch = -2
 azimuth = 182.5
 roll = 0.3
 fov = { W = 123 }
-
-[cameras.ty.Image]
 path = "samples/4s/b.jpg"
 
 
@@ -57,6 +47,4 @@ pitch = -3.4
 azimuth = 266.5
 roll = -0.75
 fov = { W = 123 }
-
-[cameras.ty.Image]
 path = "samples/4s/l.jpg"

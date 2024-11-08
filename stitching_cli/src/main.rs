@@ -4,10 +4,9 @@ use clap::{Parser, Subcommand};
 use image::{GenericImageView, ImageBuffer, Luma};
 
 use stitch::{
-    camera::ProjectionStyle,
-    config,
+    camera::ProjStyle,
     frame::{FrameBuffer, StaticFrameBuffer},
-    grad, RenderState,
+    grad, Config, ImageSpec, RenderState,
 };
 
 #[cfg(feature = "raylib")]
@@ -21,7 +20,7 @@ pub fn main() {
 
     // hack to get around small default stack size
     std::thread::Builder::new()
-        .stack_size(16 * 10 << 20)
+        .stack_size(16 * (10 << 20))
         .name("stitcher".to_string())
         .spawn(move || args.run())
         .unwrap()
@@ -58,30 +57,28 @@ impl Args {
             #[cfg(feature = "raylib")]
             ArgCommand::Window => {
                 let (state, _watcher) =
-                    config::Config::open_state_watch("cams.toml", WIDTH, HEIGHT).unwrap();
+                    Config::open_state_watch("cams.toml", WIDTH, HEIGHT).unwrap();
                 render_raylib::<WIDTH, HEIGHT>(state);
             }
             #[cfg(feature = "gif")]
             ArgCommand::Gif => {
-                let state = config::Config::open_state("cams.toml", WIDTH, HEIGHT).unwrap();
+                let state = Config::open_state("cams.toml", WIDTH, HEIGHT).unwrap();
                 render_gif::<StaticFrameBuffer<1280, 720>>(state);
             }
             ArgCommand::Png => {
-                let state = config::Config::open_state("cams.toml", WIDTH, HEIGHT).unwrap();
+                let state = Config::open_state("cams.toml", WIDTH, HEIGHT).unwrap();
                 render_png::<StaticFrameBuffer<1280, 720>>(state);
             }
             ArgCommand::Flat => {
-                let state = config::Config::open_state("cams.toml", WIDTH, HEIGHT).unwrap();
+                let state = Config::open_state("cams.toml", WIDTH, WIDTH).unwrap();
                 render_flat_img::<StaticFrameBuffer<WIDTH, WIDTH>>(state);
             }
             ArgCommand::Masks { y_thresh, c_thresh } => {
-                let cfg = config::Config::open("cams.toml").unwrap();
+                let cfg = Config::open("cams.toml").unwrap();
                 for c in cfg.cameras {
-                    let config::CameraType::Image { path: img_path, .. } = c.ty else {
-                        panic!("camera is not an image type");
-                    };
+                    let ImageSpec { path: img_path, .. } = &c.ty;
 
-                    let img = image::open(&img_path).unwrap();
+                    let img = image::open(img_path).unwrap();
                     let out_img = ImageBuffer::from_par_fn(img.width(), img.height(), |x, y| {
                         let image::Rgba(p) = img.get_pixel(x, y);
                         let p = p.map(|v| v as i32);
@@ -103,13 +100,11 @@ impl Args {
                 }
             }
             ArgCommand::Grads => {
-                let cfg = config::Config::open("cams.toml").unwrap();
+                let cfg = Config::open("cams.toml").unwrap();
                 for c in cfg.cameras {
-                    let config::CameraType::Image { path: img_path, .. } = c.ty else {
-                        panic!("camera is not an image type");
-                    };
-                    println!("start {:?}", img_path);
-                    let img = image::open(&img_path).unwrap().to_rgb8();
+                    let ImageSpec { path: img_path, .. } = &c.ty;
+
+                    let img = image::open(img_path).unwrap().to_rgb8();
                     let img = grad::guass_filter(&img, 2.5);
                     let img = grad::gradients(&img);
 
@@ -153,10 +148,10 @@ fn render_raylib<const W: usize, const H: usize>(
         let mut state = state.lock().unwrap();
         let dt = rl.get_frame_time();
 
-        let changed = check_keys(&rl, &mut state, dt);
+        let changed = check_keys(&rl, &mut state.proj.spec, dt);
 
         if rl.is_key_pressed(ffi::KeyboardKey::KEY_R) {
-            let cs = crate::config::Config::open("cams.toml")
+            let cs = crate::Config::open("cams.toml")
                 .unwrap()
                 .load_state(W, H)
                 .unwrap();
@@ -173,12 +168,12 @@ fn render_raylib<const W: usize, const H: usize>(
 
         let debug_text = format!(
             "az = {:.1} p = {:.1} at {:.2}, {:.2}, {:.2} | {:?}",
-            state.proj.cfg.azimuth.to_degrees(),
-            state.proj.cfg.pitch.to_degrees(),
-            state.proj.cfg.x,
-            state.proj.cfg.y,
-            state.proj.cfg.z,
-            state.proj.cfg.ty,
+            state.proj.spec.azimuth.to_degrees(),
+            state.proj.spec.pitch.to_degrees(),
+            state.proj.spec.x,
+            state.proj.spec.y,
+            state.proj.spec.z,
+            state.proj.ty,
         );
 
         drop(state);
@@ -229,31 +224,137 @@ fn render_raylib<const W: usize, const H: usize>(
     }
 }
 
+// #[cfg(feature = "raylib")]
+// async fn render_live_raylib<const W: usize, const H: usize>(
+//     state: Arc<Mutex<RenderState<StaticFrameBuffer<W, H>, stitch::LiveBuffer, stitch::LiveSpec>>>,
+// ) {
+//     use raylib::{
+//         ffi,
+//         prelude::RaylibDraw,
+//         texture::{self, RaylibTexture2D},
+//     };
+
+//     let (mut rl, thread) = raylib::init().resizable().title("project").build();
+
+//     rl.set_target_fps(30);
+
+//     let mut img = texture::Image::gen_image_color(
+//         W as i32,
+//         H as i32,
+//         ffi::Color {
+//             r: 0,
+//             b: 0,
+//             g: 0,
+//             a: 255,
+//         },
+//     );
+//     img.set_format(ffi::PixelFormat::PIXELFORMAT_UNCOMPRESSED_R8G8B8);
+
+//     let mut txt = rl.load_texture_from_image(&thread, &img).unwrap();
+//     let mut last_change = Instant::now();
+
+//     while !rl.window_should_close() {
+//         let mut state = state.lock().unwrap();
+//         let dt = rl.get_frame_time();
+
+//         let changed = check_keys(&rl, &mut state.proj.spec, dt);
+
+//         if rl.is_key_pressed(ffi::KeyboardKey::KEY_R) {
+//             let cs = stitch::Config::<stitch::LiveSpec>::open_live("cams.toml")
+//                 .unwrap()
+//                 .load_state(W, H)
+//                 .await
+//                 .unwrap();
+//             *state = cs;
+//         }
+
+//         if changed || last_change.elapsed().as_millis() > 1000 {
+//             last_change = Instant::now();
+
+//             state.update_proj_async().await;
+
+//             txt.update_texture(state.proj.buf.as_bytes());
+//         }
+
+//         let debug_text = format!(
+//             "az = {:.1} p = {:.1} at {:.2}, {:.2}, {:.2} | {:?}",
+//             state.proj.spec.azimuth.to_degrees(),
+//             state.proj.spec.pitch.to_degrees(),
+//             state.proj.spec.x,
+//             state.proj.spec.y,
+//             state.proj.spec.z,
+//             state.proj.ty,
+//         );
+
+//         drop(state);
+
+//         let screen_width = rl.get_screen_width() as f32;
+//         let screen_height = rl.get_screen_height() as f32;
+
+//         let scale = (screen_width / W as f32).min(screen_height / H as f32);
+
+//         let mut d = rl.begin_drawing(&thread);
+
+//         d.clear_background(ffi::Color {
+//             r: 10,
+//             b: 10,
+//             g: 10,
+//             a: 255,
+//         });
+
+//         d.draw_texture_ex(
+//             &txt,
+//             ffi::Vector2 {
+//                 x: ((screen_width - W as f32 * scale) / 2.).max(0.),
+//                 y: ((screen_height - H as f32 * scale) / 2.).max(0.),
+//             },
+//             0.,
+//             scale,
+//             ffi::Color {
+//                 r: 255,
+//                 b: 255,
+//                 g: 255,
+//                 a: 255,
+//             },
+//         );
+
+//         d.draw_fps(10, 10);
+//         d.draw_text(
+//             &debug_text,
+//             10,
+//             screen_height as i32 - 30,
+//             14,
+//             ffi::Color {
+//                 r: 255,
+//                 b: 255,
+//                 g: 255,
+//                 a: 255,
+//             },
+//         );
+//     }
+// }
+
 #[cfg(feature = "raylib")]
-fn check_keys<P: FrameBuffer>(
-    rl: &raylib::RaylibHandle,
-    state: &mut RenderState<P>,
-    dt: f32,
-) -> bool {
+fn check_keys(rl: &raylib::RaylibHandle, spec: &mut stitch::camera::CameraSpec, dt: f32) -> bool {
     use raylib::ffi;
     use std::f32::consts::PI;
 
     let mut changed = false;
 
-    if rl.is_key_down(ffi::KeyboardKey::KEY_UP) && state.proj.cfg.pitch < PI / 2. - 1e-1 {
-        state.proj.cfg.pitch += dt;
+    if rl.is_key_down(ffi::KeyboardKey::KEY_UP) && spec.pitch < PI / 2. - 1e-1 {
+        spec.pitch += dt;
         changed = true;
     }
-    if rl.is_key_down(ffi::KeyboardKey::KEY_DOWN) && state.proj.cfg.pitch > -PI / 2. + 1e-1 {
-        state.proj.cfg.pitch -= dt;
+    if rl.is_key_down(ffi::KeyboardKey::KEY_DOWN) && spec.pitch > -PI / 2. + 1e-1 {
+        spec.pitch -= dt;
         changed = true;
     }
     if rl.is_key_down(ffi::KeyboardKey::KEY_LEFT) {
-        state.proj.cfg.azimuth -= dt * 1.5;
+        spec.azimuth -= dt * 1.5;
         changed = true;
     }
     if rl.is_key_down(ffi::KeyboardKey::KEY_RIGHT) {
-        state.proj.cfg.azimuth += dt * 1.5;
+        spec.azimuth += dt * 1.5;
         changed = true;
     }
 
@@ -288,10 +389,10 @@ fn check_keys<P: FrameBuffer>(
     }
 
     if move_lat.abs() > 1e-3 || move_forw.abs() > 1e-3 || move_up.abs() > 1e-3 {
-        let az = state.proj.cfg.azimuth;
-        state.proj.cfg.x += (move_forw * az.sin() + move_lat * az.cos()) * 2.0;
-        state.proj.cfg.y += (move_forw * az.cos() + move_lat * az.sin()) * 2.0;
-        state.proj.cfg.z += move_up * 2.0;
+        let az = spec.azimuth;
+        spec.x += (move_forw * az.sin() + move_lat * az.cos()) * 2.0;
+        spec.y += (move_forw * az.cos() + move_lat * az.sin()) * 2.0;
+        spec.z += move_up * 2.0;
     }
 
     changed
@@ -327,9 +428,9 @@ fn render_gif<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
 
     let mut frame_buf = vec![0u8; width * height * 3];
     for r in (0..360).step_by(1) {
-        state.proj.cfg.azimuth = (r as f32).to_radians();
+        state.proj.spec.azimuth = (r as f32).to_radians();
         time_op(&format!("project {r}"), || {
-            state.proj.project_into(&state.cams)
+            state.proj.load_projection(&state.cams)
         });
 
         let frame = time_op(&format!("convert {r}"), || {
@@ -343,7 +444,7 @@ fn render_gif<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
 }
 
 fn render_png<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
-    state.proj.project_into(&state.cams);
+    state.proj.load_projection(&state.cams);
 
     image::ImageBuffer::<image::Rgb<_>, _>::from_raw(
         state.proj.width() as u32,
@@ -371,14 +472,13 @@ fn render_flat_img<P: FrameBuffer + Sync>(state: RenderState<P>) {
         let (_, p) = cams
             .iter()
             .filter_map(|c| {
-                let (dx, dy, dz) = (xi - c.cfg.x, yi - c.cfg.y, zi - c.cfg.z);
-                Some((
-                    dx * dx + dy * dy + dz * dz,
-                    ProjectionStyle::Hemisphere { radius: 0. }.proj_back(c, (xi, yi, zi))?,
-                ))
+                let (dx, dy, dz) = (xi - c.spec.x, yi - c.spec.y, zi - c.spec.z);
+                ProjStyle::Hemisphere { radius: 0. }
+                    .proj_back(c, (xi, yi, zi))
+                    .map(|p| (dx * dx + dy * dy + dz * dz, p))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
-            .unwrap_or_default();
+            .unwrap_or((0., &[0; 3]));
 
         image::Rgb(p[..3].try_into().unwrap())
     });

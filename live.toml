@@ -1,0 +1,19 @@
+[proj]
+x = 0
+y = 0
+z = 4
+pitch = 0
+azimuth = 0
+fov = { H = 80 }
+avg_colors = false
+style = { Hemisphere = { radius = 100 } }
+
+[[cameras]]
+x = 0
+y = 4
+z = 0
+pitch = -2.1
+azimuth = 0
+roll = 0
+fov = { W = 123 }
+live_index = 32

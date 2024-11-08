@@ -12,13 +12,18 @@ winget install cmake llvm
 ```
 
 # Building/Running
+Run server
+```sh
+cargo run -p stitching_server --release
+```
+
 Run in window
 ```sh
-cargo run --release
+cargo run -p stitching_cli --release window
 ```
 
 Generate GIF
 ```sh
-cargo run --release --no-default-features
+cargo run -p stitching_cli --release gif
 ```
 
