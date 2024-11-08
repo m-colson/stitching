@@ -76,7 +76,7 @@ impl AppInner {
         let proj = Camera::new(
             cfg.proj.spec.with_dims(proj_w as f32, proj_h as f32),
             cfg.proj.ty,
-            Mutex::new(VideoPacket::new(proj_w, proj_h, 3)),
+            Mutex::new(VideoPacket::new(proj_w, proj_h, 4)),
         );
 
         let cams = futures::future::join_all(cfg.cameras.iter().map(

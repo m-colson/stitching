@@ -38,7 +38,7 @@
              */
             handleMessage(ev) {
                 if (ev.data instanceof ArrayBuffer) {
-                    this.currData.data.set(ev.data.slice(8));
+                    this.currData.data.set(new Uint8Array(ev.data.slice(8)));
                     this.syncView();
                 } else {
                     console.error("unhandled data type for message", ev)

@@ -28,7 +28,7 @@ impl<O: zerocopy::ByteOrder> VideoPacket<O> {
         zerocopy::U16::<O>::new(width as u16)
             .write_to(&mut inner[1..3])
             .unwrap();
-        zerocopy::U16::<O>::new(width as u16)
+        zerocopy::U16::<O>::new(height as u16)
             .write_to(&mut inner[3..5])
             .unwrap();
         inner[5] = chans as u8;

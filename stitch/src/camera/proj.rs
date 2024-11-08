@@ -323,7 +323,7 @@ impl<D: Deref<Target = [(f32, f32, f32)]>> ForwardProj<D> {
                 let Some(best_p) = cs.iter().find_map(|&c| style.proj_back(c, (xi, yi, zi))) else {
                     return;
                 };
-                p.copy_from_slice(best_p);
+                copy_pixel_into(best_p, p);
             });
     }
 }
@@ -347,6 +347,23 @@ impl<D: Deref<Target = [(f32, f32, f32)]>> Deref for ForwardProj<D> {
 impl<D: DerefMut<Target = [(f32, f32, f32)]>> DerefMut for ForwardProj<D> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+#[inline]
+fn copy_pixel_into(src: &[u8], dest: &mut [u8]) {
+    match (src.len(), dest.len()) {
+        (1, 2) => {
+            dest[0] = src[0];
+            dest[1] = 255;
+        }
+        (3, 4) => {
+            dest[0] = src[0];
+            dest[1] = src[1];
+            dest[2] = src[2];
+            dest[3] = 255;
+        }
+        _ => dest.copy_from_slice(src),
     }
 }
 
