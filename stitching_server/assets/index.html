@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
-    <title>CASA Viewer</title>
+    <title>CASA Viewer - Camera for Situation Awareness</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
+    <link rel="stylesheet" href="/style.css">
     <script>
         class ProjectionView extends HTMLCanvasElement {
             /**@type WebSocket*/
@@ -20,8 +20,9 @@
 
             connectedCallback() {
                 this.conn = new WebSocket("/video");
-                this.conn.addEventListener("message", this.handleMessage);
-                this.conn.addEventListener("close", this.handleClose);
+                this.conn.binaryType = "arraybuffer";
+                this.conn.addEventListener("message", this.handleMessage.bind(this));
+                this.conn.addEventListener("close", this.handleClose.bind(this));
 
                 this.ctx = this.getContext("2d");
                 this.currData = this.ctx.createImageData(this.width, this.height);
@@ -32,29 +33,76 @@
                 console.log("Custom element removed from page.");
             }
 
-            adoptedCallback() {
-                console.log("Custom element moved to new page.");
-            }
-
+            /**
+             * @param {MessageEvent<any>} ev
+             */
             handleMessage(ev) {
-                console.log(ev);
+                if (ev.data instanceof ArrayBuffer) {
+                    this.currData.data.set(ev.data.slice(8));
+                    this.syncView();
+                } else {
+                    console.error("unhandled data type for message", ev)
+                }
             }
 
+            /**
+             * @param {CloseEvent} ev
+             */
             handleClose(ev) {
-                console.log(ev);
+                console.log("WebSocket connection closed:", ev);
             }
 
             syncView() {
-                this.ctx.putImageData(this.currData, 0, 0)
+                this.ctx.putImageData(this.currData, 0, 0);
             }
         }
 
-        customElements.define("projection-view", ProjectionView, { extends: "canvas" })
+        customElements.define("projection-view", ProjectionView, { extends: "canvas" });
     </script>
 </head>
 
 <body>
-    <canvas is="projection-view" id="imgview" width="1080" height="720"></canvas>
+    <div class="container">
+        <h1>Camera for Situation Awareness</h1>
+
+        <div class="panorama">
+            <canvas is="projection-view" id="imgview" width="1280" height="720"></canvas>
+        </div>
+
+        <div class="view-selector">
+            <button>View 1</button>
+            <button>View 2</button>
+            <button>View 3</button>
+            <button>View 4</button>
+            <button>360 View</button>
+        </div>
+
+        <div class="current-view">
+            <p>Current View: 360</p>
+        </div>
+
+        <div class="info-panels">
+            <div class="object-warning">
+                <h2>Object Warning</h2>
+                <p>Object approaching...</p>
+                <div class="object-tags">
+                    <span>Object 1</span>
+                    <span>Object 2</span>
+                    <span>Object 3</span>
+                </div>
+            </div>
+
+            <div class="statistics">
+                <h3>3:10 PM</h3>
+                <h2>Statistics</h2>
+                <ul>
+                    <li><strong>Confidence Score:</strong> 28%</li>
+                    <li><strong>Alert Message:</strong> Impact highly likely</li>
+                    <li><strong>Detection location:</strong> East</li>
+                </ul>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>
