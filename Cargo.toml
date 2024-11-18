@@ -1,6 +1,28 @@
 [workspace]
-members = ["stitch", "stitching_cli", "stitching_server"]
+members = ["smpgpu", "stitch", "stitching_cli", "stitching_server"]
 resolver = "2"
 
+[workspace.dependencies]
+futures = "0.3.31"
+image = { version = "0.25.4", default-features = false, features = [
+    "png",
+    "jpeg",
+] }
+kanal = "0.1.0-pre8"
+tokio = { version = "1.41.0", features = ["rt-multi-thread", "sync"] }
+tracing = "0.1.40"
+
+[workspace.dependencies.nokhwa]
+version = "0.10.4"
+git = "https://github.com/wangjia184/nokhwa.git"
+branch = "0.10"
+features = ["input-native", "output-threaded"]
+
+[profile.dev]
+debug = false
+incremental = true
+
 [profile.release]
-lto = "thin"
+debug = true
+lto = false
+incremental = true

@@ -1,43 +1,76 @@
-use std::f32::consts::PI;
+use std::{f32::consts::PI, future::Future};
 
 use serde::{Deserialize, Serialize};
 
 mod img;
 pub use img::ImageSpec;
 
-mod proj;
-pub use proj::{ProjSpec, ProjStyle};
-
 #[cfg(feature = "live")]
 pub mod live;
 #[cfg(feature = "live")]
-pub use live::{LiveBuffer, LiveSpec};
+pub use live::{live_camera_loader, LiveSpec};
 
 mod group;
-pub use group::CameraGroupAsync;
+pub use group::{CameraGroup, CameraGroupAsync};
 
-mod util;
-
-use crate::frame::{FrameBuffer, FrameBufferable, ToFrameBufferAsync};
+use crate::frame::{FrameBuffer, ToFrameBuffer, ToFrameBufferAsync};
 
 #[derive(Clone, Debug)]
-pub struct Camera<T, K> {
+pub struct Camera<T, K = ()> {
     pub spec: CameraSpec,
-    pub ty: K,
+    pub meta: K,
     pub buf: T,
 }
 
-impl<T: FrameBufferable, K> Camera<T, K> {
-    pub fn new(spec: CameraSpec, ty: K, buf: T) -> Self {
-        Self { spec, ty, buf }
+impl<T, K> Camera<T, K> {
+    pub fn new(spec: CameraSpec, meta: K, buf: T) -> Self {
+        Self { spec, meta, buf }
+    }
+
+    pub fn map<N>(self, f: impl FnOnce(T) -> N) -> Camera<N> {
+        Camera {
+            spec: self.spec,
+            meta: (),
+            buf: f(self.buf),
+        }
+    }
+
+    pub fn map_with_meta<N>(self, f: impl FnOnce(T) -> N) -> Camera<N, K>
+    where
+        K: Clone,
+    {
+        Camera {
+            spec: self.spec,
+            meta: self.meta.clone(),
+            buf: f(self.buf),
+        }
+    }
+
+    pub fn with_map<N>(&self, f: impl FnOnce(&T) -> N) -> Camera<N> {
+        Camera {
+            spec: self.spec,
+            meta: (),
+            buf: f(&self.buf),
+        }
+    }
+
+    pub async fn with_map_fut<'a, N, Fut: Future<Output = N>>(
+        &'a self,
+        f: impl FnOnce(&'a T) -> Fut,
+    ) -> Camera<N> {
+        Camera {
+            spec: self.spec,
+            meta: (),
+            buf: f(&self.buf).await,
+        }
     }
 }
 
-impl<T: FrameBufferable + Default, K> Camera<T, K> {
-    pub fn new_default(spec: CameraSpec, ty: K) -> Self {
+impl<T: Default, K> Camera<T, K> {
+    pub fn new_default(spec: CameraSpec, meta: K) -> Self {
         Self {
             spec,
-            ty,
+            meta,
             buf: T::default(),
         }
     }
@@ -45,11 +78,12 @@ impl<T: FrameBufferable + Default, K> Camera<T, K> {
 
 impl<T: FrameBuffer + Default, K> From<crate::config::CameraConfig<K>> for Camera<T, K> {
     fn from(value: crate::config::CameraConfig<K>) -> Self {
-        Self::new_default(value.spec, value.ty)
+        Self::new_default(value.spec, value.meta)
     }
 }
 
 impl<T: FrameBuffer, K> Camera<T, K> {
+    #[inline]
     pub fn at(&self, x: f32, y: f32) -> Option<&[u8]> {
         let x = x + 0.5;
         let y = y + 0.5;
@@ -87,11 +121,22 @@ impl<T: FrameBuffer, K> Camera<T, K> {
     }
 }
 
-impl<'a, T: ToFrameBufferAsync<'a>, K: Clone> Camera<T, K> {
-    pub async fn to_frame_async(&'a self) -> Camera<T::Output, K> {
+impl<'a, T: ToFrameBuffer<'a>, K> Camera<T, K> {
+    #[inline]
+    pub fn to_frame_buf(&'a self) -> Camera<T::Output, ()> {
         Camera {
             spec: self.spec,
-            ty: self.ty.clone(),
+            meta: (),
+            buf: self.buf.to_frame_buf(),
+        }
+    }
+}
+
+impl<'a, T: ToFrameBufferAsync<'a>, K> Camera<T, K> {
+    pub async fn to_frame_async(&'a self) -> Camera<T::Output> {
+        Camera {
+            spec: self.spec,
+            meta: (),
             buf: self.buf.to_frame_async().await,
         }
     }
@@ -102,20 +147,42 @@ pub struct CameraSpec {
     pub x: f32,
     pub y: f32,
     pub z: f32,
-    #[serde(with = "util::deg_rad")]
+    #[serde(with = "conv_deg_rad")]
     pub pitch: f32,
-    #[serde(with = "util::deg_rad")]
+    #[serde(with = "conv_deg_rad")]
     pub azimuth: f32,
-    #[serde(default, with = "util::deg_rad")]
+    #[serde(default, with = "conv_deg_rad")]
     pub roll: f32,
     pub fov: CameraFov,
+    #[serde(default)]
+    pub lens: CameraLens,
+}
+
+mod conv_deg_rad {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(v: &f32, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        s.serialize_f32(v.to_degrees())
+    }
+
+    pub fn deserialize<'de, D>(d: D) -> Result<f32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        f32::deserialize(d).map(f32::to_radians)
+    }
 }
 
 impl CameraSpec {
+    #[inline]
     pub fn set_dims(&mut self, w: f32, h: f32) {
         self.fov = self.fov.with_aspect(w, h);
     }
 
+    #[inline]
     pub fn with_dims(mut self, w: f32, h: f32) -> Self {
         self.set_dims(w, h);
         self
@@ -149,10 +216,26 @@ impl CameraFov {
         }
     }
 
+    #[inline]
     pub fn radians(self) -> (f32, f32) {
         let Self::WHRadians(x, y) = self else {
             panic!("can't get radians of {self:?}");
         };
         (x, y)
     }
+
+    #[inline]
+    pub fn diag_radians(self) -> f32 {
+        let (fx, fy) = self.radians();
+        (fx * fx + fy * fy).sqrt()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
+pub enum CameraLens {
+    #[default]
+    #[serde(rename = "rectilinear")]
+    Rectilinear,
+    #[serde(rename = "equidistant")]
+    Equidistant,
 }

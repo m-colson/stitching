@@ -5,5 +5,6 @@
 out.gif
 out.png
 flat.png
+flamegraph.svg
 
 **/*.grads.png

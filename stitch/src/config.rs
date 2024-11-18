@@ -1,13 +1,19 @@
 use std::path::Path;
 
 use image::ImageDecoder;
+use nokhwa::utils::Resolution;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    camera::{Camera, CameraSpec, ImageSpec, ProjSpec},
-    frame::{FrameBuffer, FrameBufferable, SizedFrameBuffer},
-    Error, RenderState, Result,
+    camera::{Camera, CameraSpec, ImageSpec},
+    frame::{FrameBuffer, FrameSize, SizedFrameBuffer},
+    loader::{FrameLoader, OwnedWriteBuffer},
+    proj::ProjSpec,
+    Error, FrameBufferMut, RenderState, Result,
 };
+
+#[cfg(feature = "live")]
+use crate::camera::live::LiveSpec;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config<Cam = ImageSpec> {
@@ -33,7 +39,7 @@ impl Config {
         let rel_base = rel_base.parent().unwrap();
 
         for c in &mut out.cameras {
-            c.ty.fix_paths(rel_base);
+            c.meta.fix_paths(rel_base);
         }
 
         Ok(out)
@@ -109,7 +115,7 @@ impl Config {
 }
 
 #[cfg(feature = "live")]
-impl Config<crate::LiveSpec> {
+impl Config<LiveSpec> {
     #[cfg(feature = "toml-cfg")]
     pub fn open_live(p: impl AsRef<Path>) -> Result<Self> {
         toml::from_str::<Self>(
@@ -125,7 +131,7 @@ pub struct CameraConfig<K> {
     #[serde(flatten)]
     pub spec: CameraSpec,
     #[serde(flatten)]
-    pub ty: K,
+    pub meta: K,
 }
 
 impl<K> CameraConfig<K> {
@@ -134,41 +140,41 @@ impl<K> CameraConfig<K> {
         self
     }
 
-    pub fn with_buffer<B: FrameBufferable>(self, buf: B) -> Camera<B, K> {
-        Camera::new(self.spec, self.ty, buf)
+    pub fn with_buffer<B>(self, buf: B) -> Camera<B, K> {
+        Camera::new(self.spec, self.meta, buf)
     }
 }
 
 impl CameraConfig<ImageSpec> {
-    pub fn load<B: FrameBuffer + Default>(self) -> Result<Camera<B, ImageSpec>> {
+    pub fn load<B: FrameBufferMut + Default>(self) -> Result<Camera<B, ImageSpec>> {
         let mut out = Camera::from(self);
-        out.ty.load_into(&mut out.buf)?;
+        out.meta.load_into(&mut out.buf)?;
         out.spec.set_dims(out.width() as f32, out.height() as f32);
         Ok(out)
     }
 
-    pub fn load_with<B: FrameBuffer>(self, buf: B) -> Result<Camera<B, ImageSpec>> {
-        let mut out = Camera::new(self.spec, self.ty, buf);
-        out.ty.load_into(&mut out.buf)?;
+    pub fn load_with<B: FrameBufferMut>(self, buf: B) -> Result<Camera<B, ImageSpec>> {
+        let mut out = Camera::new(self.spec, self.meta, buf);
+        out.meta.load_into(&mut out.buf)?;
         out.spec.set_dims(out.width() as f32, out.height() as f32);
         Ok(out)
     }
 
-    pub fn load_heaped<B: FrameBuffer>(self) -> Result<Camera<Box<B>, ImageSpec>> {
+    pub fn load_heaped<B: FrameBufferMut>(self) -> Result<Camera<Box<B>, ImageSpec>> {
         let mut uninit_buf = Box::<B>::new_uninit();
-        self.ty
+        self.meta
             .load_into(unsafe { uninit_buf.as_mut_ptr().as_mut().unwrap() })?;
         let buf = unsafe { uninit_buf.assume_init() };
 
         Ok(Camera::new(
             self.spec.with_dims(buf.width() as f32, buf.height() as f32),
-            self.ty,
+            self.meta,
             buf,
         ))
     }
 
     pub fn load_sized(self) -> Result<Camera<SizedFrameBuffer, ImageSpec>> {
-        let path = &self.ty.path;
+        let path = &self.meta.path;
         let dec = image::ImageReader::open(path)
             .map_err(Error::io_ctx(format!("opening {path:?}")))?
             .into_decoder()?;
@@ -181,26 +187,25 @@ impl CameraConfig<ImageSpec> {
 
         Ok(Camera::new(
             self.spec.with_dims(img_width as f32, img_height as f32),
-            self.ty,
+            self.meta,
             buf,
         ))
     }
 }
 
 #[cfg(feature = "live")]
-impl CameraConfig<crate::LiveSpec> {
-    pub async fn load_live(self) -> Result<Camera<crate::LiveBuffer, crate::LiveSpec>> {
-        let mut out = Camera::new(
-            self.spec,
-            self.ty,
-            crate::LiveBuffer::new(self.ty.live_index)?,
-        );
+impl CameraConfig<LiveSpec> {
+    pub fn load<B: OwnedWriteBuffer + 'static>(self) -> Result<Camera<FrameLoader<B>, LiveSpec>> {
+        let buf = crate::camera::live_camera_loader(
+            self.meta.live_index,
+            nokhwa::utils::RequestedFormatType::HighestResolution(Resolution::new(1280, 720)),
+        )?;
+        let (w, h, _) = buf.frame_size();
 
-        {
-            let (width, height, _) = out.buf.cam_info().await;
-            out.spec.set_dims(width as f32, height as f32);
-        }
-
-        Ok(out)
+        Ok(Camera::new(
+            self.spec.with_dims(w as f32, h as f32),
+            self.meta,
+            buf,
+        ))
     }
 }

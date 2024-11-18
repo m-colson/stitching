@@ -1,13 +1,11 @@
-use std::{marker::PhantomData, ops::ControlFlow, time::Duration};
+use std::{borrow::Cow, f32::consts::PI, marker::PhantomData, ops::ControlFlow};
 
-use axum::extract::ws::{Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt, TryStreamExt};
-use stitch::{
-    frame::{FrameBufferable, ToFrameBufferAsync},
-    FrameBuffer,
-};
-use tokio::{sync::oneshot, time::Instant};
+use stitch::frame::{FrameBuffer, FrameBufferMut, FrameSize};
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
+
+use crate::util::time_fut;
 
 use super::App;
 
@@ -43,9 +41,7 @@ impl<O: zerocopy::ByteOrder> VideoPacket<O> {
     }
 }
 
-impl<O: zerocopy::ByteOrder> FrameBufferable for VideoPacket<O> {}
-
-impl<O: zerocopy::ByteOrder> FrameBuffer for VideoPacket<O> {
+impl<O: zerocopy::ByteOrder> FrameSize for VideoPacket<O> {
     fn width(&self) -> usize {
         zerocopy::U16::<O>::ref_from_bytes(&self.0[1..3])
             .unwrap()
@@ -61,93 +57,71 @@ impl<O: zerocopy::ByteOrder> FrameBuffer for VideoPacket<O> {
     fn chans(&self) -> usize {
         self.0[5] as usize
     }
+}
 
+impl<O: zerocopy::ByteOrder> FrameBuffer for VideoPacket<O> {
     fn as_bytes(&self) -> &[u8] {
         &self.0[8..]
     }
+}
 
+impl<O: zerocopy::ByteOrder> FrameBufferMut for VideoPacket<O> {
     fn as_bytes_mut(&mut self) -> &mut [u8] {
         &mut self.0[8..]
     }
 }
 
 pub async fn conn_state_machine(state: App, socket: WebSocket) {
-    let (send_down, recv_down) = oneshot::channel::<()>();
-    std::thread::spawn(move || {
-        let rt: tokio::runtime::Runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+    let (sender, receiver) = socket.split();
 
-        let (sender, receiver) = socket.split();
+    let mut send_task = tokio::spawn(send_loop(state.clone(), sender));
 
-        let local = tokio::task::LocalSet::new();
-
-        let mut send_task = local.spawn_local(send_loop(state.clone(), sender));
-
-        let mut recv_task = local.spawn_local(async move {
-            receiver
-                .try_take_while(|msg| {
-                    let res = process_message(msg).is_continue();
-                    async move { Ok(res) }
-                })
-                .count()
-                .await
-        });
-
-        local.spawn_local(async move {
-            tokio::select! {
-                rv_a = (&mut send_task) => {
-                    _ = rv_a.inspect_err(|e| println!("Error sending messages {e:?}"));
-                    recv_task.abort();
-                },
-                rv_b = (&mut recv_task) => {
-                    _ = rv_b.inspect_err(|e| println!("Error receiving messages {e:?}"));
-                    send_task.abort();
-                }
-            }
-        });
-
-        rt.block_on(local);
-        drop(send_down);
+    let mut recv_task = tokio::spawn(async move {
+        receiver
+            .try_take_while(|msg| {
+                let res = process_message(msg).is_continue();
+                async move { Ok(res) }
+            })
+            .count()
+            .await
     });
 
-    _ = recv_down.await;
+    tokio::select! {
+        rv_a = (&mut send_task) => {
+            _ = rv_a.inspect_err(|e| println!("Error sending messages {e:?}"));
+            recv_task.abort();
+        },
+        rv_b = (&mut recv_task) => {
+            _ = rv_b.inspect_err(|e| println!("Error receiving messages {e:?}"));
+            send_task.abort();
+        }
+    }
 }
 
 async fn send_loop<S>(state: App, mut sender: S)
 where
     S: SinkExt<Message> + std::marker::Unpin,
 {
-    const FPS: u64 = 15;
-    loop {
-        let frame_start_time = Instant::now();
-
-        let proj = state.proj();
-        let mut lock_buf = proj.buf.to_frame_async().await;
-
-        let style = proj.ty.style;
-        let forws = style.forward_proj(proj.spec, lock_buf.width(), lock_buf.height());
-        forws.load_back(style, state.lock_cams().await, &mut lock_buf);
-
-        let msg = lock_buf.take_message();
-
-        if sender.send(msg).await.is_err() {
-            return;
+    while let Some(msg) = state.ws_frame().await {
+        if time_fut("send frame".to_string(), sender.send(msg))
+            .await
+            .is_err()
+        {
+            break;
         }
 
-        tokio::time::sleep_until(frame_start_time + Duration::from_millis(1000 / FPS)).await;
-
-        // NOTE: Currently unnecessary, here for future reference
-        // ----
-        // If this fails, the connection has already closed anway.
-        // _ = sender
-        //     .send(Message::Close(Some(CloseFrame {
-        //         code: axum::extract::ws::close_code::ABNORMAL,
-        //         reason: Cow::from("Closing for unknown reason"),
-        //     })))
-        //     .await;
+        state.update_spec(|s| {
+            s.azimuth += PI / 180.;
+        });
     }
+
+    // If this fails, the connection has already closed anyway.
+    _ = sender
+        .send(Message::Close(Some(CloseFrame {
+            code: axum::extract::ws::close_code::AWAY,
+            reason: Cow::from("No more frames"),
+        })))
+        .await;
 }
 
 fn process_message(msg: &Message) -> ControlFlow<()> {
@@ -169,13 +143,9 @@ fn process_message(msg: &Message) -> ControlFlow<()> {
             }
             return ControlFlow::Break(());
         }
-
         Message::Pong(v) => {
             println!(">>> sent pong with {v:?}");
         }
-        // You should never need to manually handle Message::Ping, as axum's websocket library
-        // will do so for you automagically by replying with Pong and copying the v according to
-        // spec. But if you need the contents of the pings you can see them here.
         Message::Ping(v) => {
             println!(">>> sent ping with {v:?}");
         }

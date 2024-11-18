@@ -4,9 +4,12 @@ use clap::{Parser, Subcommand};
 use image::{GenericImageView, ImageBuffer, Luma};
 
 use stitch::{
-    camera::ProjStyle,
-    frame::{FrameBuffer, StaticFrameBuffer},
-    grad, Config, ImageSpec, RenderState,
+    camera::ImageSpec,
+    config::Config,
+    frame::{FrameBuffer, FrameBufferMut, StaticFrameBuffer},
+    grad,
+    proj::{CpuProjector, UnitProjector},
+    RenderState,
 };
 
 #[cfg(feature = "raylib")]
@@ -76,7 +79,7 @@ impl Args {
             ArgCommand::Masks { y_thresh, c_thresh } => {
                 let cfg = Config::open("cams.toml").unwrap();
                 for c in cfg.cameras {
-                    let ImageSpec { path: img_path, .. } = &c.ty;
+                    let ImageSpec { path: img_path, .. } = &c.meta;
 
                     let img = image::open(img_path).unwrap();
                     let out_img = ImageBuffer::from_par_fn(img.width(), img.height(), |x, y| {
@@ -102,7 +105,7 @@ impl Args {
             ArgCommand::Grads => {
                 let cfg = Config::open("cams.toml").unwrap();
                 for c in cfg.cameras {
-                    let ImageSpec { path: img_path, .. } = &c.ty;
+                    let ImageSpec { path: img_path, .. } = &c.meta;
 
                     let img = image::open(img_path).unwrap().to_rgb8();
                     let img = grad::guass_filter(&img, 2.5);
@@ -124,6 +127,7 @@ fn render_raylib<const W: usize, const H: usize>(
         prelude::RaylibDraw,
         texture::{self, RaylibTexture2D},
     };
+    use stitch::proj::CpuProjector;
 
     let (mut rl, thread) = raylib::init().resizable().title("project").build();
 
@@ -161,7 +165,7 @@ fn render_raylib<const W: usize, const H: usize>(
         if changed || last_change.elapsed().as_millis() > 1000 {
             last_change = Instant::now();
 
-            state.update_proj();
+            state.update_proj(&CpuProjector::none());
 
             txt.update_texture(state.proj.buf.as_bytes());
         }
@@ -173,7 +177,7 @@ fn render_raylib<const W: usize, const H: usize>(
             state.proj.spec.x,
             state.proj.spec.y,
             state.proj.spec.z,
-            state.proj.ty,
+            state.proj.meta,
         );
 
         drop(state);
@@ -399,7 +403,7 @@ fn check_keys(rl: &raylib::RaylibHandle, spec: &mut stitch::camera::CameraSpec, 
 }
 
 #[cfg(feature = "gif")]
-fn render_gif<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
+fn render_gif<P: FrameBufferMut + Sync>(mut state: RenderState<P>) {
     use std::fs;
 
     fn time_op<T>(name: &str, f: impl FnOnce() -> T) -> T {
@@ -430,7 +434,9 @@ fn render_gif<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
     for r in (0..360).step_by(1) {
         state.proj.spec.azimuth = (r as f32).to_radians();
         time_op(&format!("project {r}"), || {
-            state.proj.load_projection(&state.cams)
+            state
+                .proj
+                .load_projection(&CpuProjector::none(), &state.cams)
         });
 
         let frame = time_op(&format!("convert {r}"), || {
@@ -443,8 +449,10 @@ fn render_gif<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
     }
 }
 
-fn render_png<P: FrameBuffer + Sync>(mut state: RenderState<P>) {
-    state.proj.load_projection(&state.cams);
+fn render_png<P: FrameBufferMut + Sync>(mut state: RenderState<P>) {
+    state
+        .proj
+        .load_projection(&CpuProjector::none(), &state.cams);
 
     image::ImageBuffer::<image::Rgb<_>, _>::from_raw(
         state.proj.width() as u32,
@@ -468,14 +476,13 @@ fn render_flat_img<P: FrameBuffer + Sync>(state: RenderState<P>) {
     let out = image::RgbImage::from_par_fn(width as u32, height as u32, |x, y| {
         let x = (x as f32 - (width as f32) / 2.) * ax;
         let y = -(y as f32 - (height as f32) / 2.) * ay;
-        let (xi, yi, zi) = ((x * ax).sin() * cz, (y * ay).sin() * cz, 0.);
+        let int_p @ (xi, yi, zi) = ((x * ax).sin() * cz, (y * ay).sin() * cz, 0.);
         let (_, p) = cams
             .iter()
             .filter_map(|c| {
                 let (dx, dy, dz) = (xi - c.spec.x, yi - c.spec.y, zi - c.spec.z);
-                ProjStyle::Hemisphere { radius: 0. }
-                    .proj_back(c, (xi, yi, zi))
-                    .map(|p| (dx * dx + dy * dy + dz * dz, p))
+                let (cx, cy) = CpuProjector::none().world_to_img_space(c.spec, int_p);
+                c.at(cx, cy).map(|p| (dx * dx + dy * dy + dz * dz, p))
             })
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .unwrap_or((0., &[0; 3]));

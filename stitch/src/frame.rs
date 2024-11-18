@@ -4,13 +4,22 @@ use image::ImageDecoder;
 
 use crate::Result;
 
-pub trait FrameBuffer: FrameBufferable {
+pub trait FrameSize {
     fn width(&self) -> usize;
     fn height(&self) -> usize;
     fn chans(&self) -> usize;
 
+    fn frame_size(&self) -> (usize, usize, usize) {
+        (self.width(), self.height(), self.chans())
+    }
+
+    fn num_bytes(&self) -> usize {
+        self.width() * self.height() * self.chans()
+    }
+}
+
+pub trait FrameBuffer: FrameSize {
     fn as_bytes(&self) -> &[u8];
-    fn as_bytes_mut(&mut self) -> &mut [u8];
 
     fn pixel_at(&self, x: usize, y: usize) -> &[u8] {
         if x >= self.width() {
@@ -22,6 +31,11 @@ pub trait FrameBuffer: FrameBufferable {
 
         let chans = self.chans();
         &self.as_bytes()[(x + (y * self.height())) * chans..][..chans]
+    }
+
+    fn pixel_iter(&self) -> impl Iterator<Item = &[u8]> {
+        let chans = self.chans();
+        self.as_bytes().chunks(chans)
     }
 
     fn mask_bytes(&self) -> Option<&[u8]> {
@@ -38,6 +52,15 @@ pub trait FrameBuffer: FrameBufferable {
         DimErrorKind::Channel.check(self.chans(), img_chans as usize)?;
 
         Ok(())
+    }
+}
+
+pub trait FrameBufferMut: FrameBuffer {
+    fn as_bytes_mut(&mut self) -> &mut [u8];
+
+    fn pixel_iter_mut(&mut self) -> impl Iterator<Item = &mut [u8]> {
+        let chans = self.chans();
+        self.as_bytes_mut().chunks_mut(chans)
     }
 }
 
@@ -82,14 +105,12 @@ impl DimErrorKind {
     }
 }
 
-pub trait FrameBufferable {}
-
-pub trait ToFrameBuffer: FrameBufferable {
-    type Output: FrameBuffer;
-    fn to_frame_buf(&self) -> Self::Output;
+pub trait ToFrameBuffer<'a> {
+    type Output: FrameBuffer + 'a;
+    fn to_frame_buf(&'a self) -> Self::Output;
 }
 
-pub trait ToFrameBufferAsync<'a>: FrameBufferable {
+pub trait ToFrameBufferAsync<'a> {
     type Output: FrameBuffer + 'a;
     fn to_frame_async(&'a self) -> impl Future<Output = Self::Output>;
 }
@@ -99,12 +120,7 @@ pub struct StaticFrameBuffer<const W: usize, const H: usize, const C: usize = 3>
     data: [[[u8; C]; W]; H],
 }
 
-impl<const W: usize, const H: usize, const C: usize> FrameBufferable
-    for StaticFrameBuffer<W, H, C>
-{
-}
-
-impl<const W: usize, const H: usize, const C: usize> FrameBuffer for StaticFrameBuffer<W, H, C> {
+impl<const W: usize, const H: usize, const C: usize> FrameSize for StaticFrameBuffer<W, H, C> {
     fn width(&self) -> usize {
         W
     }
@@ -116,11 +132,15 @@ impl<const W: usize, const H: usize, const C: usize> FrameBuffer for StaticFrame
     fn chans(&self) -> usize {
         C
     }
+}
 
+impl<const W: usize, const H: usize, const C: usize> FrameBuffer for StaticFrameBuffer<W, H, C> {
     fn as_bytes(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(&self.data[0][0][0] as *const u8, H * W * C) }
     }
+}
 
+impl<const W: usize, const H: usize, const C: usize> FrameBufferMut for StaticFrameBuffer<W, H, C> {
     fn as_bytes_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(&mut self.data[0][0][0] as *mut u8, H * W * C) }
     }
@@ -161,9 +181,7 @@ impl SizedFrameBuffer {
     }
 }
 
-impl FrameBufferable for SizedFrameBuffer {}
-
-impl FrameBuffer for SizedFrameBuffer {
+impl FrameSize for SizedFrameBuffer {
     fn width(&self) -> usize {
         self.width
     }
@@ -175,19 +193,21 @@ impl FrameBuffer for SizedFrameBuffer {
     fn chans(&self) -> usize {
         self.chans
     }
+}
 
+impl FrameBuffer for SizedFrameBuffer {
     fn as_bytes(&self) -> &[u8] {
         self.data.as_ref()
     }
+}
 
+impl FrameBufferMut for SizedFrameBuffer {
     fn as_bytes_mut(&mut self) -> &mut [u8] {
         self.data.as_mut()
     }
 }
 
-impl<B: FrameBufferable + ?Sized> FrameBufferable for Box<B> {}
-
-impl<B: FrameBuffer + ?Sized> FrameBuffer for Box<B> {
+impl<B: FrameSize + ?Sized> FrameSize for Box<B> {
     fn width(&self) -> usize {
         (**self).width()
     }
@@ -197,12 +217,11 @@ impl<B: FrameBuffer + ?Sized> FrameBuffer for Box<B> {
     fn chans(&self) -> usize {
         (**self).chans()
     }
+}
 
+impl<B: FrameBuffer + ?Sized> FrameBuffer for Box<B> {
     fn as_bytes(&self) -> &[u8] {
         (**self).as_bytes()
-    }
-    fn as_bytes_mut(&mut self) -> &mut [u8] {
-        (**self).as_bytes_mut()
     }
 
     fn mask_bytes(&self) -> Option<&[u8]> {
@@ -211,5 +230,49 @@ impl<B: FrameBuffer + ?Sized> FrameBuffer for Box<B> {
 
     fn check_decoder(&self, dec: &impl ImageDecoder) -> Result<()> {
         (**self).check_decoder(dec)
+    }
+}
+
+impl<B: FrameBufferMut + ?Sized> FrameBufferMut for Box<B> {
+    fn as_bytes_mut(&mut self) -> &mut [u8] {
+        (**self).as_bytes_mut()
+    }
+}
+
+pub struct FrameBufferView<'a> {
+    data: &'a [u8],
+    width: usize,
+    height: usize,
+    chans: usize,
+}
+
+impl<'a> FrameBufferView<'a> {
+    pub fn new(size: (usize, usize, usize), data: &'a [u8]) -> Self {
+        Self {
+            data,
+            width: size.0,
+            height: size.1,
+            chans: size.2,
+        }
+    }
+}
+
+impl<'a> FrameSize for FrameBufferView<'a> {
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn chans(&self) -> usize {
+        self.chans
+    }
+}
+
+impl<'a> FrameBuffer for FrameBufferView<'a> {
+    fn as_bytes(&self) -> &[u8] {
+        self.data
     }
 }

@@ -1,34 +1,33 @@
 pub mod camera;
-pub use camera::{Camera, CameraFov, CameraGroupAsync, ImageSpec, ProjSpec};
-#[cfg(feature = "live")]
-pub use camera::{LiveBuffer, LiveSpec};
+use camera::{Camera, ImageSpec};
 
 pub mod config;
 pub use config::{CameraConfig, Config};
 
 pub mod frame;
 use frame::DimError;
-pub use frame::{FrameBuffer, SizedFrameBuffer, StaticFrameBuffer};
+use frame::{FrameBuffer, FrameBufferMut, FrameSize, SizedFrameBuffer};
 
 pub mod grad;
+
+pub mod loader;
+
+pub mod proj;
+use proj::{ProjSpec, UnitProjector};
 
 #[cfg(feature = "tokio")]
 pub mod sync_frame;
 
 #[derive(Debug)]
-pub struct RenderState<
-    P: frame::FrameBufferable,
-    C: frame::FrameBufferable = SizedFrameBuffer,
-    S = ImageSpec,
-> {
+pub struct RenderState<P, C = SizedFrameBuffer, S = ImageSpec> {
     pub proj: Camera<P, ProjSpec>,
     pub cams: Vec<Camera<C, S>>,
 }
 
-impl<P: FrameBuffer + Sync, C: FrameBuffer + Sync> RenderState<P, C> {
-    pub fn update_proj(&mut self) {
+impl<P: FrameBufferMut + Sync, C: FrameBuffer + Sync> RenderState<P, C> {
+    pub fn update_proj<J: UnitProjector + Sync>(&mut self, proj: &J) {
         self.proj.buf.as_bytes_mut().fill(0);
-        self.proj.load_projection(&self.cams);
+        self.proj.load_projection(proj, &self.cams);
     }
 }
 
@@ -45,7 +44,7 @@ pub enum Error {
     #[error("image cast failed")]
     ImageCastFailure,
 
-    #[error("{0}")]
+    #[error(transparent)]
     Dims(#[from] DimError),
 
     #[cfg(feature = "toml-cfg")]
@@ -59,6 +58,10 @@ pub enum Error {
     #[cfg(feature = "live")]
     #[error("live err: {0}")]
     LiveErr(#[from] nokhwa::NokhwaError),
+
+    #[cfg(feature = "gpu")]
+    #[error("gpu error: {0}")]
+    GpuError(#[from] smpgpu::Error),
 }
 
 impl Error {
