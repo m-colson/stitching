@@ -7,15 +7,10 @@
     <link rel="stylesheet" href="/style.css">
     <script>
         class ProjectionView extends HTMLCanvasElement {
-            /**@type WebSocket*/
-            conn;
-            /**@type CanvasRenderingContext2D */
-            ctx;
-            /**@type ImageData*/
-            currData;
-
             constructor() {
                 super();
+                this.ctx = this.getContext("2d");
+                this.currData = this.ctx.createImageData(this.width, this.height);
             }
 
             connectedCallback() {
@@ -23,41 +18,80 @@
                 this.conn.binaryType = "arraybuffer";
                 this.conn.addEventListener("message", this.handleMessage.bind(this));
                 this.conn.addEventListener("close", this.handleClose.bind(this));
-
-                this.ctx = this.getContext("2d");
-                this.currData = this.ctx.createImageData(this.width, this.height);
+                this.conn.addEventListener("error", (e) => console.error("WebSocket error:", e));
             }
 
-            disconnectedCallback() {
-                this.conn.close(1000, "disconnecting");
-                console.log("Custom element removed from page.");
-            }
-
-            /**
-             * @param {MessageEvent<any>} ev
-             */
             handleMessage(ev) {
                 if (ev.data instanceof ArrayBuffer) {
-                    this.currData.data.set(new Uint8Array(ev.data.slice(8)));
-                    this.syncView();
-                } else {
-                    console.error("unhandled data type for message", ev)
+                    const data = new DataView(ev.data);
+                    const packetType = data.getUint8(0); // First byte is the packet type
+                    if (packetType === 2) { // Update Frame packet
+                        this.currData.data.set(new Uint8Array(ev.data.slice(8))); // Frame starts at byte 8
+                        this.syncView();
+                    } else {
+                        console.error("Unexpected packet type:", packetType);
+                    }
                 }
-            }
-
-            /**
-             * @param {CloseEvent} ev
-             */
-            handleClose(ev) {
-                console.log("WebSocket connection closed:", ev);
             }
 
             syncView() {
                 this.ctx.putImageData(this.currData, 0, 0);
             }
+
+            handleClose(ev) {
+                console.warn("WebSocket connection closed:", ev.reason);
+                this.ctx.fillStyle = "black";
+                this.ctx.fillRect(0, 0, this.width, this.height);
+                this.ctx.fillStyle = "white";
+                this.ctx.font = "20px Arial";
+                this.ctx.fillText("Connection lost", 50, 50);
+            }
         }
 
         customElements.define("projection-view", ProjectionView, { extends: "canvas" });
+
+        // Add event listeners for buttons
+        document.addEventListener("DOMContentLoaded", () => {
+            const canvas = document.getElementById("imgview");
+
+            const sendViewChange = (viewId) => {
+                if (canvas.conn && canvas.conn.readyState === WebSocket.OPEN) {
+                    const packet = new Uint8Array(2);
+                    packet[0] = 4; // Packet type: Change View
+                    packet[1] = viewId; // View ID
+                    canvas.conn.send(packet);
+                    console.log(`Sent view change request for View ${viewId}`);
+                } else {
+                    console.error("WebSocket connection is not open.");
+                }
+            };
+
+            document.getElementById("view1").addEventListener("click", () => {
+                updateCurrentView("View 1");
+                sendViewChange(1);
+            });
+            document.getElementById("view2").addEventListener("click", () => {
+                updateCurrentView("View 2");
+                sendViewChange(2);
+            });
+            document.getElementById("view3").addEventListener("click", () => {
+                updateCurrentView("View 3");
+                sendViewChange(3);
+            });
+            document.getElementById("view4").addEventListener("click", () => {
+                updateCurrentView("View 4");
+                sendViewChange(4);
+            });
+            document.getElementById("view360").addEventListener("click", () => {
+                updateCurrentView("360 View");
+                sendViewChange(5);
+            });
+
+            const updateCurrentView = (viewName) => {
+                const currentViewText = document.querySelector(".current-view p");
+                currentViewText.textContent = `Current View: ${viewName}`;
+            };
+        });
     </script>
 </head>
 
@@ -70,11 +104,11 @@
         </div>
 
         <div class="view-selector">
-            <button>View 1</button>
-            <button>View 2</button>
-            <button>View 3</button>
-            <button>View 4</button>
-            <button>360 View</button>
+            <button id="view1">View 1</button>
+            <button id="view2">View 2</button>
+            <button id="view3">View 3</button>
+            <button id="view4">View 4</button>
+            <button id="view360">360 View</button>
         </div>
 
         <div class="current-view">
