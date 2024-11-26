@@ -13,7 +13,7 @@ pub mod grad;
 pub mod loader;
 
 pub mod proj;
-use proj::{ProjSpec, UnitProjector};
+use proj::ProjSpec;
 
 #[cfg(feature = "tokio")]
 pub mod sync_frame;
@@ -22,13 +22,6 @@ pub mod sync_frame;
 pub struct RenderState<P, C = SizedFrameBuffer, S = ImageSpec> {
     pub proj: Camera<P, ProjSpec>,
     pub cams: Vec<Camera<C, S>>,
-}
-
-impl<P: FrameBufferMut + Sync, C: FrameBuffer + Sync> RenderState<P, C> {
-    pub fn update_proj<J: UnitProjector + Sync>(&mut self, proj: &J) {
-        self.proj.buf.as_bytes_mut().fill(0);
-        self.proj.load_projection(proj, &self.cams);
-    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

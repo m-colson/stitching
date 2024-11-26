@@ -160,18 +160,18 @@ impl CameraConfig<ImageSpec> {
         Ok(out)
     }
 
-    pub fn load_heaped<B: FrameBufferMut>(self) -> Result<Camera<Box<B>, ImageSpec>> {
-        let mut uninit_buf = Box::<B>::new_uninit();
-        self.meta
-            .load_into(unsafe { uninit_buf.as_mut_ptr().as_mut().unwrap() })?;
-        let buf = unsafe { uninit_buf.assume_init() };
+    // pub fn load_heaped<B: FrameBufferMut>(self) -> Result<Camera<Box<B>, ImageSpec>> {
+    //     let mut uninit_buf = Box::<B>::new_uninit();
+    //     self.meta
+    //         .load_into(unsafe { uninit_buf.as_mut_ptr().as_mut().unwrap() })?;
+    //     let buf = unsafe { uninit_buf.assume_init() };
 
-        Ok(Camera::new(
-            self.spec.with_dims(buf.width() as f32, buf.height() as f32),
-            self.meta,
-            buf,
-        ))
-    }
+    //     Ok(Camera::new(
+    //         self.spec.with_dims(buf.width() as f32, buf.height() as f32),
+    //         self.meta,
+    //         buf,
+    //     ))
+    // }
 
     pub fn load_sized(self) -> Result<Camera<SizedFrameBuffer, ImageSpec>> {
         let path = &self.meta.path;
@@ -195,16 +195,22 @@ impl CameraConfig<ImageSpec> {
 
 #[cfg(feature = "live")]
 impl CameraConfig<LiveSpec> {
-    pub fn load<B: OwnedWriteBuffer + 'static>(self) -> Result<Camera<FrameLoader<B>, LiveSpec>> {
+    pub fn load<B: OwnedWriteBuffer + 'static>(
+        self,
+        target_x: u32,
+        target_y: u32,
+    ) -> Result<Camera<FrameLoader<B>>> {
         let buf = crate::camera::live_camera_loader(
-            self.meta.live_index,
-            nokhwa::utils::RequestedFormatType::HighestResolution(Resolution::new(1280, 720)),
+            self.meta,
+            nokhwa::utils::RequestedFormatType::HighestResolution(Resolution::new(
+                target_x, target_y,
+            )),
         )?;
         let (w, h, _) = buf.frame_size();
 
         Ok(Camera::new(
             self.spec.with_dims(w as f32, h as f32),
-            self.meta,
+            (),
             buf,
         ))
     }

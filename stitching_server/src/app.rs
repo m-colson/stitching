@@ -6,7 +6,7 @@ use std::{
 };
 
 use axum::{extract::ws::Message, routing::get, Router};
-use stitch::camera::CameraSpec;
+use stitch::{camera::CameraSpec, proj::ProjSpec};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
 use crate::{log, util::ws_upgrader};
@@ -14,6 +14,7 @@ use crate::{log, util::ws_upgrader};
 mod stitcher;
 use stitcher::Sticher;
 
+mod proto;
 mod video;
 
 #[derive(Clone)]
@@ -38,21 +39,10 @@ impl App {
         p: impl AsRef<Path>,
         proj_w: usize,
         proj_h: usize,
-    ) -> stitch::Result<Self> {
-        AppInner::from_toml_cfg(p, proj_w, proj_h)
-            .await
-            .map(Arc::new)
-            .map(Self)
-    }
-
-    pub async fn from_toml_cfg_gpu(
-        p: impl AsRef<Path>,
-        proj_w: usize,
-        proj_h: usize,
         cam_w: usize,
         cam_h: usize,
     ) -> stitch::Result<Self> {
-        AppInner::from_toml_cfg_gpu(p, proj_w, proj_h, cam_w, cam_h)
+        AppInner::from_toml_cfg(p, proj_w, proj_h, cam_w, cam_h)
             .await
             .map(Arc::new)
             .map(Self)
@@ -82,26 +72,17 @@ impl App {
         self.0.stitcher.next_frame_msg().await
     }
 
-    pub fn update_spec<F: FnOnce(&mut CameraSpec) + Send + 'static>(&self, f: F) {
-        self.0.stitcher.update_spec(f);
+    pub fn update_cam_spec<F: FnOnce(&mut CameraSpec) + Send + 'static>(&self, f: F) {
+        self.0.stitcher.update_cam_spec(f);
+    }
+
+    pub fn update_ty<F: FnOnce(&mut ProjSpec) + Send + 'static>(&self, f: F) {
+        self.0.stitcher.update_ty(f);
     }
 }
 
 impl AppInner {
     pub async fn from_toml_cfg(
-        p: impl AsRef<Path>,
-        proj_w: usize,
-        proj_h: usize,
-    ) -> stitch::Result<Self> {
-        let cfg = stitch::Config::open_live(&p)?;
-        tracing::info!("opened config at {:?}", p.as_ref());
-
-        Ok(AppInner {
-            stitcher: Sticher::from_cfg(cfg, proj_w, proj_h),
-        })
-    }
-
-    pub async fn from_toml_cfg_gpu(
         p: impl AsRef<Path>,
         proj_w: usize,
         proj_h: usize,

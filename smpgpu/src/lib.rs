@@ -1,17 +1,24 @@
+use std::{num::NonZero, sync::Arc};
+pub use wgpu::{include_wgsl, vertex_attr_array, QueueWriteBufferView};
+
+mod bind;
+pub use bind::{Bindable, Bindings};
+
+mod buffer;
+pub use buffer::{Buffer, BufferBuilder};
+
 mod cmd;
-
-use std::{num::NonZero, sync::Arc, time::Instant};
-
-pub use cmd::{CommandBuilder, CommandCheckpoint};
-
-mod bufs;
-pub use bufs::{Buffer, BufferBuilder, Texture, TextureBuilder};
+pub use cmd::{ComputeCheckpoint, RenderCheckpoint};
 
 mod mem;
 use encase::{internal::WriteInto, ShaderType};
 pub use mem::MemMapper;
 
-pub use wgpu::{include_wgsl, QueueWriteBufferView};
+mod sampler;
+pub use sampler::{Sampler, SamplerBuilder};
+
+mod texture;
+pub use texture::{Texture, TextureBuilder};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -33,6 +40,7 @@ impl Context {
     #[inline]
     fn features() -> wgpu::Features {
         wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+            | wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER
     }
 
     #[inline]
@@ -72,21 +80,17 @@ impl Context {
         });
 
         let weak = Arc::downgrade(&out);
-        std::thread::spawn(move || {
+        tokio::task::spawn_blocking(move || {
             while wake_recv.recv().is_ok() {
                 let Some(ctx) = weak.upgrade() else { break };
-
-                let start = Instant::now();
                 while ctx.block_poll_device() {}
-
-                let took = format!("{}us", start.elapsed().as_micros());
-                tracing::debug!(took, "gpu polling")
             }
         });
 
         Ok(out)
     }
 
+    #[inline]
     pub fn signal_wake(&self) {
         self.wake_poll.send(()).expect("poller has died");
     }
@@ -125,6 +129,7 @@ impl Context {
 }
 
 impl AsRef<wgpu::Device> for Context {
+    #[inline]
     fn as_ref(&self) -> &wgpu::Device {
         &self.dev
     }

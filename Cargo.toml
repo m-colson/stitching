@@ -1,5 +1,5 @@
 [workspace]
-members = ["smpgpu", "stitch", "stitching_cli", "stitching_server"]
+members = ["smpgpu", "stitch", "stitching_server"]
 resolver = "2"
 
 [workspace.dependencies]

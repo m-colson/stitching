@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use image::ImageDecoder;
 use serde::{Deserialize, Serialize};
 
-use crate::{frame::FrameBufferMut, Error, Result};
+use crate::{
+    frame::{check_against_decoder, FrameBufferMut},
+    Error, Result,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageSpec {
@@ -26,7 +29,7 @@ impl ImageSpec {
         let dec = image::ImageReader::open(path)
             .map_err(Error::io_ctx(format!("opening {path:?}")))?
             .into_decoder()?;
-        buf.check_decoder(&dec)?;
+        check_against_decoder(buf, &dec)?;
 
         dec.read_image(buf.as_bytes_mut())?;
         Ok(())

@@ -15,21 +15,43 @@ where
     |State(state), ws: WebSocketUpgrade| async move { ws.on_upgrade(move |sock| cb(state, sock)) }
 }
 
-#[inline]
-pub(crate) fn time_op<T>(name: &str, f: impl FnOnce() -> T) -> T {
-    let start = Instant::now();
-    let out = f();
-    let took = format!("{}us", start.elapsed().as_micros());
-    tracing::event!(tracing::Level::DEBUG, name, took, "timing");
-    out
+pub(crate) struct IntervalTimer {
+    base_time: Instant,
+    mark_time: Instant,
 }
 
-#[allow(dead_code)]
-#[inline]
-pub(crate) async fn time_fut<T>(name: String, f: impl Future<Output = T>) -> T {
-    let start = Instant::now();
-    let out = f.await;
-    let took = format!("{}us", start.elapsed().as_micros());
-    tracing::event!(tracing::Level::DEBUG, name, took, "timing");
-    out
+impl IntervalTimer {
+    #[inline]
+    pub fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            base_time: now,
+            mark_time: now,
+        }
+    }
+
+    #[inline]
+    pub fn start(&mut self) {
+        let now = Instant::now();
+        self.base_time = now;
+        self.mark_time = now;
+    }
+
+    #[inline]
+    pub fn mark(&mut self, name: &str) {
+        let now = Instant::now();
+
+        let took = format!("{:.1?}", now - self.mark_time);
+        tracing::event!(tracing::Level::DEBUG, took, "{}", name);
+
+        self.mark_time = now;
+    }
+
+    #[inline]
+    pub fn log_iters_per_sec(&self, name: &str) {
+        let diff = self.base_time.elapsed();
+        let fps = format!("{:.1}", 1. / diff.as_secs_f32());
+        let took = format!("{:.1?}", diff);
+        tracing::info!(fps, took, "{}", name);
+    }
 }

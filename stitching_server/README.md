@@ -15,12 +15,7 @@ Uses a websocket at */video* with the following binary protocol:
 ### Settings Sync
 | Field         | Type |
 |:------------- |:---- |
-| cam_x         | f32  |
-| cam_y         | f32  |
-| cam_z         | f32  |
-| cam_pitch     | f32  |
-| cam_azimuth   | f32  |
-| cam_fov_h_deg | u8   |
+| view_type     | u8   |
 
 ### Update Frame
 | Field         | Type                                |

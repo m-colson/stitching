@@ -1,7 +1,7 @@
 use std::{cell::Cell, sync::Arc};
 
 use encase::ShaderType;
-use smpgpu::{Buffer, CommandBuilder, CommandCheckpoint, Context, MemMapper};
+use smpgpu::{Bindings, Buffer, CommandCheckpoint, Context, MemMapper};
 use tokio::runtime::Handle;
 
 use crate::{
@@ -21,14 +21,14 @@ pub struct GpuProjector {
     pass_info_data: Cell<PassInfo>,
     inp_frames: Arc<Buffer>,
     inp_specs: Buffer,
-    // forwards_buf: Buffer,
     back_cp: CommandCheckpoint,
 }
 
 #[derive(ShaderType, Clone, Copy, Debug, Default)]
 struct InputSpec {
-    /// Camera's positon [x, y, z]
+    /// Camera's position [x, y, z]
     pos: glam::Vec3,
+    // Camera direction vectors
     forw: glam::Vec3,
     right: glam::Vec3,
     up: glam::Vec3,
@@ -54,8 +54,8 @@ impl From<CameraSpec> for InputSpec {
 
         let pv = glam::vec2(s.pitch.cos(), s.pitch.sin());
         let right = glam::vec3(s.azimuth.cos(), s.azimuth.sin(), 0.0);
-        let forw = glam::vec3(right.y * pv.x, right.x * pv.x, pv.y);
-        let up = glam::vec3(-right.y * pv.y, -right.y * pv.y, pv.x);
+        let forw = glam::vec3(-right.y * pv.x, right.x * pv.x, pv.y);
+        let up = glam::vec3(right.y * pv.y, -right.x * pv.y, pv.x);
 
         Self {
             pos: glam::vec3(s.x, s.y, s.z),
@@ -117,27 +117,31 @@ impl GpuProjector {
 
         let inp_specs = Buffer::builder(&*ctx)
             .label("inp_specs")
-            .size_for_many::<Vec<InputSpec>>(input_dim.2 as _)
+            .size_for_many::<InputSpec>(input_dim.2 as _)
             .storage()
             .writable()
             .build();
 
-        // let forwards_buf = Buffer::builder(&ctx.dev)
-        //     .label("forwards_buf")
-        //     .size_for_many::<Vec<glam::Vec3>>((w * h) as _)
-        //     .storage()
-        //     .writable()
-        //     .build();
-
-        let back_cp = CommandBuilder::new(&*ctx)
-            .with_shader(smpgpu::include_wgsl!("shaders/project.wgsl"))
+        let back_bindings = Bindings::new(&*ctx)
             .bind(&out_frame)
             .bind(&pass_info)
             .bind(&inp_frames)
-            .bind(&inp_specs)
-            // .bind(&forwards_buf)
-            .entry_point("main")
-            .work_groups(w, h, 1);
+            .bind(&inp_specs);
+
+        let back_cp = back_bindings
+            .compute_shader(smpgpu::include_wgsl!("shaders/compute.wgsl"), "main")
+            .work_groups(w, h, 1)
+            .into();
+
+        // let back_cp = back_bindings
+        //     .render_shader(
+        //         smpgpu::include_wgsl!("shaders/render.wgsl"),
+        //         "vs_main",
+        //         "fs_main",
+        //     )
+        //     .vertices(0..4)
+        //     .instances(0..1)
+        //     .into();
 
         GpuProjector {
             ctx,
@@ -152,7 +156,6 @@ impl GpuProjector {
             }),
             inp_frames: Arc::new(inp_frames),
             inp_specs,
-            // forwards_buf,
             back_cp,
         }
     }
@@ -187,28 +190,6 @@ impl Projector for GpuProjector {
         self.pass_info_data.set(data);
 
         self.ctx.write_uniform(&self.pass_info, &data);
-
-        // self.forwards_buf.write_cb(&self.ctx.queue, |raw| {
-        //     let width = fp.width;
-        //     let height = fp.height;
-        //     let pseudo = CpuProjector::sized(width, height);
-
-        //     raw.chunks_mut(u64::from(glam::Vec3::SHADER_SIZE) as usize * fp.width)
-        //         .enumerate()
-        //         .for_each(|(sy, row)| {
-        //             row.chunks_mut(u64::from(glam::Vec3::SHADER_SIZE) as _)
-        //                 .enumerate()
-        //                 .for_each(move |(sx, p)| {
-        //                     let sx = sx as f32 / width as f32 - 0.5;
-        //                     let sy = sy as f32 / height as f32 - 0.5;
-        //                     StorageBuffer::new(p)
-        //                         .write(&glam::Vec3::from(
-        //                             pseudo.screen_to_world(style, spec, sx, sy),
-        //                         ))
-        //                         .unwrap();
-        //                 })
-        //         });
-        // });
     }
 
     fn load_back<F: FrameBuffer, K>(
@@ -223,7 +204,7 @@ impl Projector for GpuProjector {
 
         let back_cmd = self
             .back_cp
-            .ref_builder(&*self.ctx)
+            .builder(&*self.ctx)
             .then(self.out_frame.copy_to_buf_op(&self.out_staging))
             .build();
 

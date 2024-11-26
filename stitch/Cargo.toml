@@ -12,6 +12,7 @@ live = ["dep:nokhwa", "dep:zerocopy", "tokio", "tokio/rt"]
 gpu = ["dep:smpgpu", "dep:glam"]
 
 [dependencies]
+cmov = "0.3.1"
 encase = { version = "0.10.0", features = ["glam"] }
 futures.workspace = true
 glam = { version = "0.29.2", optional = true }

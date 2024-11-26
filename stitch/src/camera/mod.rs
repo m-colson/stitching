@@ -23,10 +23,12 @@ pub struct Camera<T, K = ()> {
 }
 
 impl<T, K> Camera<T, K> {
+    #[inline]
     pub fn new(spec: CameraSpec, meta: K, buf: T) -> Self {
         Self { spec, meta, buf }
     }
 
+    #[inline]
     pub fn map<N>(self, f: impl FnOnce(T) -> N) -> Camera<N> {
         Camera {
             spec: self.spec,
@@ -35,6 +37,7 @@ impl<T, K> Camera<T, K> {
         }
     }
 
+    #[inline]
     pub fn map_with_meta<N>(self, f: impl FnOnce(T) -> N) -> Camera<N, K>
     where
         K: Clone,
@@ -46,6 +49,7 @@ impl<T, K> Camera<T, K> {
         }
     }
 
+    #[inline]
     pub fn with_map<N>(&self, f: impl FnOnce(&T) -> N) -> Camera<N> {
         Camera {
             spec: self.spec,
@@ -54,6 +58,7 @@ impl<T, K> Camera<T, K> {
         }
     }
 
+    #[inline]
     pub async fn with_map_fut<'a, N, Fut: Future<Output = N>>(
         &'a self,
         f: impl FnOnce(&'a T) -> Fut,
@@ -67,6 +72,7 @@ impl<T, K> Camera<T, K> {
 }
 
 impl<T: Default, K> Camera<T, K> {
+    #[inline]
     pub fn new_default(spec: CameraSpec, meta: K) -> Self {
         Self {
             spec,
@@ -77,6 +83,7 @@ impl<T: Default, K> Camera<T, K> {
 }
 
 impl<T: FrameBuffer + Default, K> From<crate::config::CameraConfig<K>> for Camera<T, K> {
+    #[inline]
     fn from(value: crate::config::CameraConfig<K>) -> Self {
         Self::new_default(value.spec, value.meta)
     }
@@ -144,15 +151,15 @@ impl<'a, T: ToFrameBufferAsync<'a>, K> Camera<T, K> {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct CameraSpec {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    pub pos: [f32; 3],
     #[serde(with = "conv_deg_rad")]
     pub pitch: f32,
     #[serde(with = "conv_deg_rad")]
     pub azimuth: f32,
     #[serde(default, with = "conv_deg_rad")]
     pub roll: f32,
+    #[serde(default)]
+    pub img_off: [f32; 2],
     pub fov: CameraFov,
     #[serde(default)]
     pub lens: CameraLens,
@@ -199,6 +206,7 @@ pub enum CameraFov {
 }
 
 impl CameraFov {
+    #[inline]
     pub fn with_aspect(self, width: f32, height: f32) -> Self {
         match self {
             CameraFov::W(fw) => {
@@ -232,10 +240,9 @@ impl CameraFov {
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum CameraLens {
     #[default]
-    #[serde(rename = "rectilinear")]
     Rectilinear,
-    #[serde(rename = "equidistant")]
     Equidistant,
 }

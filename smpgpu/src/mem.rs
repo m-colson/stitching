@@ -6,10 +6,12 @@ pub struct MemMapper<'a> {
 }
 
 impl<'a> MemMapper<'a> {
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[inline]
     pub fn with_cb(
         mut self,
         buf: &'a wgpu::Buffer,

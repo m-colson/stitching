@@ -33,34 +33,34 @@ pub trait FrameBuffer: FrameSize {
         &self.as_bytes()[(x + (y * self.height())) * chans..][..chans]
     }
 
-    fn pixel_iter(&self) -> impl Iterator<Item = &[u8]> {
-        let chans = self.chans();
-        self.as_bytes().chunks(chans)
-    }
-
     fn mask_bytes(&self) -> Option<&[u8]> {
         None
     }
 
-    fn check_decoder(&self, dec: &impl ImageDecoder) -> Result<()> {
-        let (img_width, img_height) = dec.dimensions();
-        let img_chans = dec.color_type().channel_count();
-
-        DimErrorKind::Bytes.check(1, (img_chans / dec.color_type().bytes_per_pixel()) as usize)?;
-        DimErrorKind::Width.check(self.width(), img_width as usize)?;
-        DimErrorKind::Height.check(self.height(), img_height as usize)?;
-        DimErrorKind::Channel.check(self.chans(), img_chans as usize)?;
-
-        Ok(())
+    fn pixel_iter(&self) -> Box<dyn Iterator<Item = &[u8]> + '_> {
+        let chans = self.chans();
+        Box::new(self.as_bytes().chunks(chans))
     }
+}
+
+pub fn check_against_decoder(buf: &impl FrameSize, dec: &impl ImageDecoder) -> Result<()> {
+    let (img_width, img_height) = dec.dimensions();
+    let img_chans = dec.color_type().channel_count();
+
+    DimErrorKind::Bytes.check(1, (img_chans / dec.color_type().bytes_per_pixel()) as usize)?;
+    DimErrorKind::Width.check(buf.width(), img_width as usize)?;
+    DimErrorKind::Height.check(buf.height(), img_height as usize)?;
+    DimErrorKind::Channel.check(buf.chans(), img_chans as usize)?;
+
+    Ok(())
 }
 
 pub trait FrameBufferMut: FrameBuffer {
     fn as_bytes_mut(&mut self) -> &mut [u8];
 
-    fn pixel_iter_mut(&mut self) -> impl Iterator<Item = &mut [u8]> {
+    fn pixel_iter_mut(&mut self) -> Box<dyn Iterator<Item = &mut [u8]> + '_> {
         let chans = self.chans();
-        self.as_bytes_mut().chunks_mut(chans)
+        Box::new(self.as_bytes_mut().chunks_mut(chans))
     }
 }
 
@@ -226,10 +226,6 @@ impl<B: FrameBuffer + ?Sized> FrameBuffer for Box<B> {
 
     fn mask_bytes(&self) -> Option<&[u8]> {
         (**self).mask_bytes()
-    }
-
-    fn check_decoder(&self, dec: &impl ImageDecoder) -> Result<()> {
-        (**self).check_decoder(dec)
     }
 }
 

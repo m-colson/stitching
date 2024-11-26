@@ -1,42 +1,40 @@
 [proj]
-x = 0
-y = 0
-z = 4
+pos = [0, 0, 4]
 pitch = 0
 azimuth = 0
 fov = { H = 80 }
 avg_colors = false
-style = { Hemisphere = { radius = 100 } }
+style.hemisphere = { radius = 70 }
 
 [[cameras]]
-x = 4.14
-y = -1.93
-z = 6.8
-pitch = 0
-azimuth = 115
+pos = [0, -16.17, 16.6]
+pitch = 0.13
+azimuth = 0
 roll = 0
-fov = { W = 150 }
+img_off = [15, 66]
+fov = { W = 148 }
 lens = "equidistant"
-live_index = 0
+live_index = 8
+mask_path = "assets/tail-mask.png"
 
 [[cameras]]
-x = -4.14
-y = -1.93
-z = 6.8
+pos = [-4.14, -1.93, 6.68]
 pitch = 0
 azimuth = -115
 roll = 0
-fov = { W = 150 }
+img_off = [15, 66]
+fov = { W = 148 }
 lens = "equidistant"
-live_index = 8
+live_index = 0
+mask_path = "assets/left-mask.png"
 
 [[cameras]]
-x = 0
-y = -16.8
-z = 16.76
-pitch = -0.13
-azimuth = 0
+pos = [4.14, -1.93, 6.68]
+pitch = 0
+azimuth = 115
 roll = 0
-fov = { W = 150 }
+img_off = [15, 66]
+fov = { W = 148 }
 lens = "equidistant"
 live_index = 4
+mask_path = "assets/right-mask.png"

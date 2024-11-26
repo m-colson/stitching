@@ -1,4 +1,4 @@
-use crate::{frame::ToFrameBufferAsync, FrameBuffer, FrameBufferMut, FrameSize, Result};
+use crate::{frame::ToFrameBufferAsync, FrameBuffer, FrameBufferMut, FrameSize};
 
 impl<'a, T: FrameBuffer + 'a> ToFrameBufferAsync<'a> for tokio::sync::Mutex<T> {
     type Output = tokio::sync::MutexGuard<'a, T>;
@@ -27,10 +27,6 @@ impl<'a, T: FrameBuffer + 'a> FrameBuffer for tokio::sync::MutexGuard<'a, T> {
 
     fn mask_bytes(&self) -> Option<&[u8]> {
         (**self).mask_bytes()
-    }
-
-    fn check_decoder(&self, dec: &impl image::ImageDecoder) -> Result<()> {
-        (**self).check_decoder(dec)
     }
 }
 

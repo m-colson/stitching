@@ -1,19 +1,19 @@
-use std::time::Instant;
-
 use axum::extract::ws::Message;
 use stitch::{
     camera::{Camera, CameraSpec, LiveSpec},
     frame::FrameSize,
-    loader::{FrameLoader, LoadingBuffer, OwnedWriteBuffer},
-    proj::{CpuProjector, FetchProjector, GpuDirectBufferWrite, GpuProjector, ProjSpec},
+    loader::{block_discard_tickets, FrameLoader, LoadingBuffer, OwnedWriteBuffer},
+    proj::{GpuDirectBufferWrite, GpuProjector, ProjSpec},
     Result,
 };
 
-use crate::util::time_op;
+use crate::util::IntervalTimer;
 
-use super::video::VideoPacket;
-
-pub type UpdateFn = Box<dyn FnOnce(&mut CameraSpec) + Send>;
+use super::proto::VideoPacket;
+pub enum UpdateFn {
+    ProjCameraSpec(Box<dyn FnOnce(&mut CameraSpec) + Send>),
+    ProjSpec(Box<dyn FnOnce(&mut ProjSpec) + Send>),
+}
 
 pub struct Sticher {
     msg_recv: kanal::AsyncReceiver<Message>,
@@ -21,29 +21,6 @@ pub struct Sticher {
 }
 
 impl Sticher {
-    pub fn from_cfg(cfg: stitch::Config<LiveSpec>, proj_w: usize, proj_h: usize) -> Self {
-        let (msg_send, msg_recv) = kanal::bounded(1);
-        let (update_send, update_recv) = kanal::bounded(4);
-
-        tokio::task::spawn_blocking(move || {
-            let inner = SticherInner::<Box<[u8]>>::from_cfg(
-                cfg,
-                proj_w,
-                proj_h,
-                msg_send,
-                update_recv,
-                LoadingBuffer::from,
-            )
-            .unwrap();
-            inner.block(CpuProjector::sized(proj_w, proj_h));
-        });
-
-        Self {
-            msg_recv: msg_recv.to_async(),
-            update_send,
-        }
-    }
-
     pub async fn from_cfg_gpu(
         cfg: stitch::Config<LiveSpec>,
         proj_w: usize,
@@ -58,10 +35,10 @@ impl Sticher {
         let (update_send, update_recv) = kanal::bounded(4);
 
         tokio::task::spawn_blocking(move || {
-            let inner: SticherInner<(), GpuDirectBufferWrite> = SticherInner::from_cfg(
+            let inner: SticherInner<GpuDirectBufferWrite> = SticherInner::from_cfg(
                 cfg,
-                proj_w,
-                proj_h,
+                (proj_w, proj_h),
+                (cam_w, cam_h),
                 msg_send,
                 update_recv,
                 LoadingBuffer::new_none,
@@ -81,37 +58,44 @@ impl Sticher {
         self.msg_recv.recv().await.ok()
     }
 
-    pub fn update_spec<F: FnOnce(&mut CameraSpec) + Send + 'static>(&self, f: F) {
-        _ = self.update_send.send(Box::new(f))
+    pub fn update_cam_spec<F: FnOnce(&mut CameraSpec) + Send + 'static>(&self, f: F) {
+        _ = self.update_send.send(UpdateFn::ProjCameraSpec(Box::new(f)))
+    }
+
+    pub fn update_ty<F: FnOnce(&mut ProjSpec) + Send + 'static>(&self, f: F) {
+        _ = self.update_send.send(UpdateFn::ProjSpec(Box::new(f)))
     }
 }
 
-struct SticherInner<T, B: OwnedWriteBuffer = T> {
+struct SticherInner<B: OwnedWriteBuffer> {
     pub sender: kanal::Sender<Message>,
     pub update_chan: kanal::Receiver<UpdateFn>,
-    pub proj_spec: CameraSpec,
+    pub proj_cam_spec: CameraSpec,
     pub proj_ty: ProjSpec,
     pub proj_buf: VideoPacket,
-    pub cams: Vec<Camera<LoadingBuffer<T, B>, LiveSpec>>,
+    pub cams: Vec<Camera<LoadingBuffer<(), B>>>,
 }
 
-impl<T, B: OwnedWriteBuffer + 'static> SticherInner<T, B>
+impl<B: OwnedWriteBuffer + 'static> SticherInner<B>
 where
-    LoadingBuffer<T, B>: FrameSize,
+    LoadingBuffer<(), B>: FrameSize,
 {
     pub fn from_cfg(
         cfg: stitch::Config<LiveSpec>,
-        proj_w: usize,
-        proj_h: usize,
+        proj_size: (usize, usize),
+        cam_size: (usize, usize),
         sender: kanal::Sender<Message>,
         update_chan: kanal::Receiver<UpdateFn>,
-        buf_maker: impl Fn(FrameLoader<B>) -> LoadingBuffer<T, B> + Clone,
+        buf_maker: impl Fn(FrameLoader<B>) -> LoadingBuffer<(), B> + Clone,
     ) -> Result<Self> {
         let cams = cfg
             .cameras
             .iter()
             .map(|cfg| {
-                let cam = cfg.load()?.map_with_meta(buf_maker.clone());
+                let cam = cfg
+                    .clone()
+                    .load(cam_size.0 as _, cam_size.1 as _)?
+                    .map_with_meta(buf_maker.clone());
                 let (w, h, c) = cam.buf.frame_size();
                 tracing::info!("loaded camera {:?} ({w} * {h} * {c})", cfg.meta.live_index);
                 Ok(cam)
@@ -123,43 +107,43 @@ where
         Ok(Self {
             sender,
             update_chan,
-            proj_spec: cfg.proj.spec.with_dims(proj_w as f32, proj_h as f32),
+            proj_cam_spec: cfg
+                .proj
+                .spec
+                .with_dims(proj_size.0 as f32, proj_size.1 as f32),
             proj_ty: cfg.proj.meta,
-            proj_buf: VideoPacket::new(proj_w, proj_h, 4),
+            proj_buf: VideoPacket::new(proj_size.0, proj_size.1, 4),
             cams,
         })
     }
 }
 
-impl<T, B: OwnedWriteBuffer> SticherInner<T, B> {
-    pub fn block(mut self, proj: impl FetchProjector<T, B>) {
-        let mut forws = proj.new_forw();
-
+impl SticherInner<GpuDirectBufferWrite> {
+    pub fn block(mut self, proj: GpuProjector) {
+        let mut timer = IntervalTimer::new();
         while self.avail_updates() {
-            let frame_start_time = Instant::now();
+            timer.start();
+            let buf_tickets = proj.take_input_buffers(&self.cams);
 
-            let buf_chans = proj.begin_fetch(&mut self.cams);
+            proj.update_cam_specs(&self.cams);
+            proj.update_proj_view(self.proj_cam_spec, self.proj_ty.style);
 
-            time_op("forward", || {
-                proj.load_forw(self.proj_ty.style, self.proj_spec, &mut forws);
-            });
+            timer.mark("setup");
 
-            let fetched_cams = time_op("frame load", || {
-                proj.block_finish_fetch(&mut self.cams, buf_chans)
-            });
+            block_discard_tickets(buf_tickets);
 
-            time_op("backward", || {
-                proj.load_back(&forws, &fetched_cams, &mut self.proj_buf)
-            });
+            timer.mark("frame load");
 
-            time_op("handoff", || {
-                let msg = self.proj_buf.take_message();
-                self.sender.send(msg).unwrap();
-            });
+            proj.update_render();
+            proj.block_copy_render_to(&mut self.proj_buf);
 
-            let frame_dur = frame_start_time.elapsed();
-            let fps = 1. / frame_dur.as_secs_f32();
-            tracing::info!(fps = fps, "render");
+            timer.mark("backward");
+
+            let msg = self.proj_buf.take_message();
+            self.sender.send(msg).unwrap();
+
+            timer.mark("handoff");
+            timer.log_iters_per_sec("render");
         }
 
         tracing::info!("stitching thread exiting");
@@ -169,7 +153,10 @@ impl<T, B: OwnedWriteBuffer> SticherInner<T, B> {
     fn avail_updates(&mut self) -> bool {
         loop {
             match self.update_chan.try_recv() {
-                Ok(Some(f)) => f(&mut self.proj_spec),
+                Ok(Some(msg)) => match msg {
+                    UpdateFn::ProjCameraSpec(f) => f(&mut self.proj_cam_spec),
+                    UpdateFn::ProjSpec(f) => f(&mut self.proj_ty),
+                },
                 Ok(None) => return true,
                 Err(_) => return false,
             }

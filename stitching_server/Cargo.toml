@@ -3,6 +3,10 @@ name = "stitching_server"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["capture"]
+capture = ["dep:image"]
+
 [dependencies]
 axum = { version = "0.7.7", default-features = false, features = [
     "http1",
@@ -17,6 +21,7 @@ clap = { version = "4.5.20", default-features = false, features = [
 ] }
 futures.workspace = true
 futures-util = "0.3.31"
+image = { workspace = true, optional = true }
 kanal.workspace = true
 nokhwa.workspace = true
 tokio = { workspace = true }

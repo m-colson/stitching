@@ -1,6 +1,5 @@
-use std::time::Instant;
-
 use crate::{
+    camera::Camera,
     frame::{FrameBufferView, ToFrameBuffer},
     FrameSize,
 };
@@ -41,12 +40,7 @@ impl<B: OwnedWriteBuffer + 'static> FrameLoader<B> {
 
         tokio::task::spawn_blocking(move || {
             while let Ok((mut req, resp_send)) = req_recv.recv() {
-                let start_time = Instant::now();
                 cb(req.owned_to_view().as_mut());
-
-                let elapsed = format!("{}us", start_time.elapsed().as_micros());
-                tracing::debug!(took = elapsed, "indiv load");
-
                 // if the receiver has been dropped, they don't want their buffer back!
                 _ = resp_send.send(req);
             }
@@ -79,6 +73,26 @@ impl<T: From<Box<[u8]>>, B: OwnedWriteBuffer> From<FrameLoader<B>> for LoadingBu
             .unwrap()
             .into();
         value.with_buffer(buf)
+    }
+}
+
+pub async fn collect_empty_camera_tickets<B: OwnedWriteBuffer, K>(
+    tickets: Vec<FrameLoaderTicket<B>>,
+    cams: &[Camera<LoadingBuffer<(), B>, K>],
+) -> Vec<Camera<FrameBufferView<'static>>> {
+    futures::future::join_all(cams.iter().zip(tickets).map(|(c, ticket)| {
+        c.with_map_fut(|b| async {
+            let _ = ticket.take().await;
+            b.as_empty_view()
+        })
+    }))
+    .await
+}
+
+#[inline]
+pub fn block_discard_tickets<B: OwnedWriteBuffer>(tickets: Vec<FrameLoaderTicket<B>>) {
+    for ticket in tickets {
+        _ = ticket.block_take();
     }
 }
 
