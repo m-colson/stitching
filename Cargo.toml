@@ -23,6 +23,5 @@ debug = false
 incremental = true
 
 [profile.release]
-debug = true
 lto = false
 incremental = true

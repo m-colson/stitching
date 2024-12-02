@@ -6,11 +6,13 @@ pub struct MemMapper<'a> {
 }
 
 impl<'a> MemMapper<'a> {
+    #[must_use]
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     #[inline]
     pub fn with_cb(
         mut self,
@@ -21,7 +23,25 @@ impl<'a> MemMapper<'a> {
         self
     }
 
+    #[cfg(feature = "tokio")]
     pub async fn run_all(self) {
+        let chans = self.slices.into_iter().map(|(b, cb)| {
+            let (res_send, res_recv) = kanal::bounded(1);
+            let bs = b.slice(..);
+            bs.map_async(wgpu::MapMode::Read, move |v| res_send.send(v).unwrap());
+            (b, bs, cb, res_recv)
+        });
+
+        futures::future::join_all(chans.map(|(b, bs, cb, res_recv)| async move {
+            res_recv.to_async().recv().await.unwrap().unwrap();
+            let data = bs.get_mapped_range();
+            cb(data);
+            b.unmap();
+        }))
+        .await;
+    }
+
+    pub fn block_all(self) {
         let chans = self
             .slices
             .into_iter()
@@ -33,12 +53,11 @@ impl<'a> MemMapper<'a> {
             })
             .collect::<Vec<_>>();
 
-        futures::future::join_all(chans.into_iter().map(|(b, bs, cb, res_recv)| async move {
-            res_recv.to_async().recv().await.unwrap().unwrap();
+        for (b, bs, cb, res_recv) in chans {
+            _ = res_recv.recv().unwrap();
             let data = bs.get_mapped_range();
             cb(data);
             b.unmap();
-        }))
-        .await;
+        }
     }
 }

@@ -5,7 +5,7 @@ cross.exe build -p stitching_server --target aarch64-unknown-linux-gnu --release
     # -perf
     -bin server
     -i 'live.toml,assets\*,stitching_server\assets\*,stitching_server\assets\**\*'
-    'C:\Users\ninja\.cargo-target\aarch64-unknown-linux-gnu\release\stitching_server' serve # --timeout 20 
+    'C:\Users\ninja\.cargo-target\aarch64-unknown-linux-gnu\release\stitching_server' serve --timeout 180
 )
 # cross.exe build -p stitching_server --target aarch64-unknown-linux-gnu
 

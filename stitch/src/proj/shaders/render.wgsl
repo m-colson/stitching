@@ -21,6 +21,10 @@ var<storage, read> inp_frames: array<u32>;
 @binding(3)
 var<storage, read> inp_specs: array<InputSpec>;
 
+@group(0)
+@binding(4)
+var<storage, read> inp_masks: array<u32>;
+
 struct InputSpec {
     pos: vec3<f32>,
     rev_mat: mat3x3<f32>,
@@ -90,7 +94,8 @@ fn opt_input_pixel(n: u32, os: vec2<f32>) -> u32 {
 }
 
 fn input_pixel(n: u32, p: vec2<u32>) -> u32 {
-    return inp_frames[p.x + (p.y + n * pass_info.inp_sizes.y) * pass_info.inp_sizes.x];
+    let off = p.x + (p.y + n * pass_info.inp_sizes.y) * pass_info.inp_sizes.x;
+    return min(inp_masks[off], inp_frames[off]);
 }
 
 // Spaces:
@@ -114,6 +119,9 @@ fn img_from_opt(s: InputSpec, angs: vec2<f32>) -> vec2<f32> {
         }
         case 1u: {
             r = s.foc_dist * angs.x;
+        }
+        case 2u: {
+            r = 2.0 * s.foc_dist * sin(angs.x / 2.0); 
         }
     }
 

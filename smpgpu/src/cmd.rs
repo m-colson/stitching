@@ -5,7 +5,7 @@ use std::ops::Range;
 use encase::ShaderSize;
 use wgpu::ComputePassDescriptor;
 
-use crate::{bind::IntoBindGroup, Buffer};
+use crate::{bind::IntoBindGroup, shader::CompiledRenderShader, Buffer, OntoDevice};
 
 pub struct ComputeCheckpoint {
     groups: Vec<wgpu::BindGroup>,
@@ -14,11 +14,14 @@ pub struct ComputeCheckpoint {
 }
 
 impl ComputeCheckpoint {
+    #[inline]
     pub fn builder(dev: &impl AsRef<wgpu::Device>) -> ComputeCheckpointBuilder<'_> {
         ComputeCheckpointBuilder::new(dev.as_ref())
     }
 
-    pub fn work_groups(mut self, x: usize, y: usize, z: usize) -> Self {
+    #[must_use]
+    #[inline]
+    pub const fn work_groups(mut self, x: usize, y: usize, z: usize) -> Self {
         self.work_groups = [x as _, y as _, z as _];
         self
     }
@@ -54,7 +57,8 @@ pub struct ComputeCheckpointBuilder<'a> {
 }
 
 impl<'a> ComputeCheckpointBuilder<'a> {
-    pub fn new(dev: &'a wgpu::Device) -> Self {
+    #[inline]
+    pub const fn new(dev: &'a wgpu::Device) -> Self {
         Self {
             dev,
             groups: Vec::new(),
@@ -117,11 +121,13 @@ pub struct RenderCheckpoint {
 }
 
 impl RenderCheckpoint {
+    #[inline]
     pub fn builder(dev: &impl AsRef<wgpu::Device>) -> RenderCheckpointBuilder {
         RenderCheckpointBuilder::new(dev)
     }
 
-    pub fn encoder<'a>(&'a self, dev: &'a impl AsRef<wgpu::Device>) -> RenderCommandBuilder {
+    #[inline]
+    pub fn encoder<'a>(&'a self, dev: &'a impl AsRef<wgpu::Device>) -> RenderCommandBuilder<'a> {
         RenderCommandBuilder {
             dev: dev.as_ref(),
             cp: self,
@@ -131,12 +137,16 @@ impl RenderCheckpoint {
         }
     }
 
-    pub fn vertices(mut self, range: Range<u32>) -> Self {
+    #[must_use]
+    #[inline]
+    pub const fn vertices(mut self, range: Range<u32>) -> Self {
         self.vert_range = range;
         self
     }
 
-    pub fn instances(mut self, range: Range<u32>) -> Self {
+    #[must_use]
+    #[inline]
+    pub const fn instances(mut self, range: Range<u32>) -> Self {
         self.insts_range = range;
         self
     }
@@ -145,11 +155,8 @@ impl RenderCheckpoint {
 pub struct RenderCheckpointBuilder<'a> {
     dev: &'a wgpu::Device,
     groups: Vec<(wgpu::BindGroupLayout, wgpu::BindGroup)>,
-    vert_shader: Option<wgpu::ShaderModule>,
-    vert_entry: Option<&'a str>,
+    shader: Option<CompiledRenderShader<'a>>,
     vert_buffers: Vec<wgpu::VertexBufferLayout<'a>>,
-    frag_shader: Option<wgpu::ShaderModule>,
-    frag_entry: Option<&'a str>,
     frag_targets: Vec<Option<wgpu::ColorTargetState>>,
 }
 
@@ -158,11 +165,8 @@ impl<'a> RenderCheckpointBuilder<'a> {
         Self {
             dev: dev.as_ref(),
             groups: Vec::new(),
-            vert_shader: None,
-            vert_entry: None,
+            shader: None,
             vert_buffers: Vec::new(),
-            frag_shader: None,
-            frag_entry: None,
             frag_targets: Vec::new(),
         }
     }
@@ -173,13 +177,8 @@ impl<'a> RenderCheckpointBuilder<'a> {
         self
     }
 
-    pub fn vert_shader(
-        mut self,
-        desc: impl Into<Option<wgpu::ShaderModuleDescriptor<'a>>>,
-        entry: impl Into<Option<&'a str>>,
-    ) -> Self {
-        self.vert_shader = desc.into().map(|desc| self.dev.create_shader_module(desc));
-        self.vert_entry = entry.into();
+    pub fn shader(mut self, shader: impl OntoDevice<CompiledRenderShader<'a>>) -> Self {
+        self.shader = Some(shader.onto_device(self.dev));
         self
     }
 
@@ -192,16 +191,6 @@ impl<'a> RenderCheckpointBuilder<'a> {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes,
         });
-        self
-    }
-
-    pub fn frag_shader(
-        mut self,
-        desc: impl Into<Option<wgpu::ShaderModuleDescriptor<'a>>>,
-        entry: impl Into<Option<&'a str>>,
-    ) -> Self {
-        self.frag_shader = desc.into().map(|desc| self.dev.create_shader_module(desc));
-        self.frag_entry = entry.into();
         self
     }
 
@@ -219,11 +208,12 @@ impl<'a> RenderCheckpointBuilder<'a> {
                 push_constant_ranges: &[],
             });
 
-        let (vert_shader, frag_shader) = match (&self.vert_shader, &self.frag_shader) {
-            (Some(vs), Some(fs)) => (vs, fs),
-            (_, Some(s)) | (Some(s), _) => (s, s),
-            _ => panic!("no shader provided to render builder"),
-        };
+        let (vert_module, vert_entry, frag_module, frag_entry) = self
+            .shader
+            .as_ref()
+            .expect("no shader provided")
+            .split()
+            .expect("no shader module in RenderShader");
 
         let pipeline = self
             .dev
@@ -231,18 +221,18 @@ impl<'a> RenderCheckpointBuilder<'a> {
                 label: None,
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: vert_shader,
-                    entry_point: self.vert_entry,
-                    compilation_options: Default::default(),
+                    module: vert_module,
+                    entry_point: vert_entry,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &self.vert_buffers,
                 },
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
-                    module: frag_shader,
-                    entry_point: self.frag_entry,
-                    compilation_options: Default::default(),
+                    module: frag_module,
+                    entry_point: frag_entry,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &self.frag_targets,
                 }),
                 multiview: None,
@@ -312,7 +302,7 @@ impl<'a> RenderCommandBuilder<'a> {
         }
 
         for (i, s) in self.vert_bufs.into_iter().enumerate() {
-            pass.set_vertex_buffer(i as _, s)
+            pass.set_vertex_buffer(i as _, s);
         }
 
         if let Some((b, f, indices)) = self.index_buf {
@@ -345,13 +335,13 @@ impl RenderAttachment {
     }
 
     #[inline]
-    pub fn load_clear(mut self, [r, g, b, a]: [f64; 4]) -> Self {
+    pub const fn load_clear(mut self, [r, g, b, a]: [f64; 4]) -> Self {
         self.ops.load = wgpu::LoadOp::Clear(wgpu::Color { r, g, b, a });
         self
     }
 
     #[inline]
-    pub fn store(mut self) -> Self {
+    pub const fn store(mut self) -> Self {
         self.ops.store = wgpu::StoreOp::Store;
         self
     }
@@ -396,7 +386,7 @@ pub trait EncoderOp {
     fn encoder_op(self, enc: &mut wgpu::CommandEncoder);
 }
 
-pub(crate) enum CopyOp<'a> {
+pub enum CopyOp<'a> {
     TextBuf(
         &'a wgpu::Texture,
         wgpu::Origin3d,
@@ -458,7 +448,7 @@ impl<'a> EncoderOp for CopyOp<'a> {
                 ext,
             ),
             CopyOp::BufBuf(src, src_off, dst, dst_off, size) => {
-                enc.copy_buffer_to_buffer(src, src_off, dst, dst_off, size)
+                enc.copy_buffer_to_buffer(src, src_off, dst, dst_off, size);
             }
         }
     }

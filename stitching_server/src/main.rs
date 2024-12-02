@@ -1,8 +1,9 @@
 use std::time::Duration;
 
+use anyhow::{anyhow, Result};
 use app::App;
 use clap::{Parser, Subcommand};
-use stitch::Config;
+use util::Metrics;
 
 mod app;
 mod util;
@@ -16,7 +17,7 @@ pub async fn main() {
         env!("CARGO_CRATE_NAME")
     ));
 
-    Args::parse().run().await
+    Args::try_parse().unwrap().run().await.unwrap();
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -26,26 +27,31 @@ pub struct Args {
 }
 
 impl Args {
-    pub async fn run(self) {
+    /// # Errors
+    /// errors can occur if the [App] cannot be loaded, or the server fails.
+    pub async fn run(self) -> Result<()> {
         match self.cmd {
             ArgCommand::Serve { timeout } => {
-                let app = App::from_toml_cfg("live.toml", 1280, 720, 1920, 1080)
-                    .await
-                    .unwrap();
+                let app = App::from_toml_cfg("live.toml", 1280, 720).await?;
 
                 match timeout {
-                    Some(n) => app
-                        .listen_and_serve_until(
+                    Some(n) => {
+                        app.listen_and_serve_until(
                             "0.0.0.0:2780",
                             tokio::time::sleep(Duration::from_secs(n)),
                         )
-                        .await
-                        .unwrap(),
-                    None => app.listen_and_serve("0.0.0.0:2780").await.unwrap(),
+                        .await?;
+
+                        Metrics::save_csv("metrics.csv")?;
+                    }
+                    None => app.listen_and_serve("0.0.0.0:2780").await?,
                 };
             }
             ArgCommand::ListLive => {
-                let cams = nokhwa::query(nokhwa::native_api_backend().unwrap()).unwrap();
+                let cams = nokhwa::query(
+                    nokhwa::native_api_backend()
+                        .ok_or_else(|| anyhow!("no camera backend found"))?,
+                )?;
                 for c in cams {
                     println!(
                         "{} -> {:?} ({:?})",
@@ -60,23 +66,23 @@ impl Args {
                 let width = 1920;
                 let height = 1080;
 
-                let cfg = Config::open_live("live.toml").unwrap();
-                let mut buf = vec![0u8; 1920 * 1080 * 4].into_boxed_slice();
+                let cfg = stitch::proj::Config::open("live.toml")?;
+                let mut buf = vec![0u8; (width * height * 4) as usize].into_boxed_slice();
                 for (i, c) in cfg.cameras.into_iter().enumerate() {
-                    let c = c.load::<Box<[u8]>>(width, height).unwrap();
-                    let ticket = c.buf.give(buf);
-                    buf = ticket.block_take();
+                    let c = c.load::<Box<[u8]>>()?;
+                    let ticket = c.data.give(buf)?;
+                    buf = ticket.block_take()?;
                     image::save_buffer(
                         format!("capture{i}.png"),
                         &buf,
                         width,
                         height,
                         image::ExtendedColorType::Rgba8,
-                    )
-                    .unwrap();
+                    )?;
                 }
             }
         }
+        Ok(())
     }
 }
 

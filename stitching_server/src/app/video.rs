@@ -1,11 +1,11 @@
-use std::{borrow::Cow, f32::consts::PI};
+use std::borrow::Cow;
 
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 
-use crate::util::IntervalTimer;
+use crate::util::{IntervalTimer, Metrics};
 
-use super::{proto::Packet, App};
+use super::{proto::RecvPacket, App};
 
 pub async fn conn_state_machine(state: App, socket: WebSocket) {
     let (sender, receiver) = socket.split();
@@ -27,20 +27,16 @@ pub async fn conn_state_machine(state: App, socket: WebSocket) {
 
 async fn send_loop<S>(state: App, mut sender: S)
 where
-    S: SinkExt<Message> + std::marker::Unpin,
+    S: SinkExt<Message> + Unpin + Send,
 {
     while let Some(msg) = state.ws_frame().await {
         let mut timer = IntervalTimer::new();
         let res = sender.send(msg).await;
-        timer.mark("send frame");
+        timer.mark("send-frame");
 
         if res.is_err() {
             break;
         }
-
-        state.update_cam_spec(|s| {
-            s.azimuth += PI / 180.;
-        });
     }
 
     // If this fails, the connection has already closed anyway.
@@ -52,28 +48,35 @@ where
         .await;
 }
 
-async fn recv_loop<R: StreamExt<Item = Result<Message, axum::Error>> + std::marker::Unpin>(
-    state: App,
-    mut receiver: R,
-) {
+async fn recv_loop<R>(state: App, mut receiver: R)
+where
+    R: StreamExt<Item = Result<Message, axum::Error>> + Unpin + Send,
+{
     while let Some(Ok(msg)) = receiver.next().await {
         if let Message::Binary(raw) = msg {
-            let Some(p) = Packet::from_raw(&raw) else {
+            let Some(p) = RecvPacket::from_raw(&raw) else {
                 tracing::error!(
                     "failed to parse packet from client starting with {:?}",
                     &raw[..raw.len().min(8)]
                 );
-                return;
+                continue;
             };
 
             match p {
-                Packet::Nop => todo!(),
-                Packet::SettingsSync(sp) => {
-                    state.update_ty(move |proj_spec| {
-                        proj_spec.style = sp.view_type(proj_spec.style.radius())
+                RecvPacket::Nop => {}
+                RecvPacket::SettingsSync(sp) => {
+                    state.update_style(move |proj_spec| {
+                        *proj_spec = sp.view_type(proj_spec.radius());
                     });
                 }
-                Packet::UpdateFrame(_) => todo!(),
+                RecvPacket::Timing(timing) => {
+                    let (took, delay) = timing.info_now();
+                    Metrics::push("client-update", delay.as_secs_f64() * 1000.);
+
+                    let took = format!("{took:.1?}");
+                    let delay = format!("{delay:.1?}");
+                    tracing::info!(delay, took, "client update");
+                }
             }
         }
     }

@@ -18,7 +18,7 @@ impl Buffer {
     }
 
     #[inline]
-    pub fn copy_to_buf_op<'a>(&'a self, buf: &'a Buffer) -> impl EncoderOp + 'a {
+    pub fn copy_to_buf_op<'a>(&'a self, buf: &'a Self) -> impl EncoderOp + 'a {
         CopyOp::BufBuf(self, 0, buf, 0, self.size())
     }
 }
@@ -71,8 +71,9 @@ pub struct BufferBuilder<'a> {
 }
 
 impl<'a> BufferBuilder<'a> {
+    #[must_use]
     #[inline]
-    pub fn new(dev: &'a wgpu::Device) -> Self {
+    pub const fn new(dev: &'a wgpu::Device) -> Self {
         Self {
             dev,
             label: None,
@@ -81,24 +82,28 @@ impl<'a> BufferBuilder<'a> {
         }
     }
 
+    #[must_use]
     #[inline]
-    pub fn label(mut self, label: &'a str) -> Self {
+    pub const fn label(mut self, label: &'a str) -> Self {
         self.label = Some(label);
         self
     }
 
+    #[must_use]
     #[inline]
-    pub fn size(mut self, size: usize) -> Self {
+    pub const fn size(mut self, size: usize) -> Self {
         self.size = size as _;
         self
     }
 
+    #[must_use]
     #[inline]
     pub fn size_for<T: ShaderSize>(mut self) -> Self {
         self.size = u64::from(T::SHADER_SIZE);
         self
     }
 
+    #[must_use]
     #[inline]
     pub fn size_for_many<T>(mut self, elms: u64) -> Self
     where
@@ -122,31 +127,37 @@ impl<'a> BufferBuilder<'a> {
         self
     }
 
+    #[must_use]
     #[inline]
     pub fn readable(self) -> Self {
         self.with_usage(wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE)
     }
 
+    #[must_use]
     #[inline]
     pub fn writable(self) -> Self {
         self.with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
     }
 
+    #[must_use]
     #[inline]
     pub fn storage(self) -> Self {
         self.with_usage(wgpu::BufferUsages::STORAGE)
     }
 
+    #[must_use]
     #[inline]
     pub fn uniform(self) -> Self {
         self.with_usage(wgpu::BufferUsages::UNIFORM)
     }
 
+    #[must_use]
     #[inline]
     pub fn vertex(self) -> Self {
         self.with_usage(wgpu::BufferUsages::VERTEX)
     }
 
+    #[must_use]
     #[inline]
     pub fn build(self) -> Buffer {
         let inner = self.dev.create_buffer(&wgpu::BufferDescriptor {
@@ -159,22 +170,25 @@ impl<'a> BufferBuilder<'a> {
         Buffer { inner }
     }
 
-    /// SAFETY: T must be safe to transmute to bytes (likely true for any type you would want to put in a buffer).
+    #[must_use]
     #[inline]
-    pub fn build_with_data<T>(self, data: &[T]) -> Buffer {
+    pub fn build_with_bytes(self, contents: &[u8]) -> Buffer {
         let inner = self
             .dev
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: self.label,
-                contents: unsafe {
-                    std::slice::from_raw_parts(
-                        data.as_ptr() as *const u8,
-                        std::mem::size_of_val(data),
-                    )
-                },
+                contents,
                 usage: self.usage,
             });
         Buffer { inner }
+    }
+
+    /// SAFETY: T must be safe to transmute to bytes (likely true for any type you would want to put in a buffer).
+    #[inline]
+    pub fn build_with_data<T>(self, data: &[T]) -> Buffer {
+        self.build_with_bytes(unsafe {
+            std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data))
+        })
     }
 }
 

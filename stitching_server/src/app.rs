@@ -6,7 +6,7 @@ use std::{
 };
 
 use axum::{extract::ws::Message, routing::get, Router};
-use stitch::{camera::CameraSpec, proj::ProjSpec};
+use stitch::proj::ProjectionStyle;
 use tokio::net::{TcpListener, ToSocketAddrs};
 
 use crate::{log, util::ws_upgrader};
@@ -36,19 +36,20 @@ impl App {
     }
 
     pub async fn from_toml_cfg(
-        p: impl AsRef<Path>,
+        p: impl AsRef<Path> + Send,
         proj_w: usize,
         proj_h: usize,
-        cam_w: usize,
-        cam_h: usize,
     ) -> stitch::Result<Self> {
-        AppInner::from_toml_cfg(p, proj_w, proj_h, cam_w, cam_h)
+        AppInner::from_toml_cfg(p, proj_w, proj_h)
             .await
             .map(Arc::new)
             .map(Self)
     }
 
-    pub async fn listen_and_serve(self, a: impl ToSocketAddrs + Debug) -> std::io::Result<()> {
+    pub async fn listen_and_serve(
+        self,
+        a: impl ToSocketAddrs + Debug + Send + Sync,
+    ) -> std::io::Result<()> {
         let bind = TcpListener::bind(&a).await?;
         tracing::info!("listening on {a:?}");
 
@@ -57,7 +58,7 @@ impl App {
 
     pub async fn listen_and_serve_until(
         self,
-        a: impl ToSocketAddrs + Debug,
+        a: impl ToSocketAddrs + Debug + Send + Sync,
         signal: impl Future<Output = ()> + Send + 'static,
     ) -> std::io::Result<()> {
         let bind = TcpListener::bind(&a).await?;
@@ -72,28 +73,22 @@ impl App {
         self.0.stitcher.next_frame_msg().await
     }
 
-    pub fn update_cam_spec<F: FnOnce(&mut CameraSpec) + Send + 'static>(&self, f: F) {
-        self.0.stitcher.update_cam_spec(f);
-    }
-
-    pub fn update_ty<F: FnOnce(&mut ProjSpec) + Send + 'static>(&self, f: F) {
-        self.0.stitcher.update_ty(f);
+    pub fn update_style<F: FnOnce(&mut ProjectionStyle) + Send + 'static>(&self, f: F) {
+        self.0.stitcher.update_style(f);
     }
 }
 
 impl AppInner {
     pub async fn from_toml_cfg(
-        p: impl AsRef<Path>,
+        p: impl AsRef<Path> + Send,
         proj_w: usize,
         proj_h: usize,
-        cam_w: usize,
-        cam_h: usize,
     ) -> stitch::Result<Self> {
-        let cfg = stitch::Config::open_live(&p)?;
+        let cfg = stitch::proj::Config::open(&p)?;
         tracing::info!("opened config at {:?}", p.as_ref());
 
-        Ok(AppInner {
-            stitcher: Sticher::from_cfg_gpu(cfg, proj_w, proj_h, cam_w, cam_h).await,
+        Ok(Self {
+            stitcher: Sticher::from_cfg_gpu(cfg, proj_w, proj_h).await,
         })
     }
 }

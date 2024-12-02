@@ -14,6 +14,7 @@ impl Texture {
         TextureBuilder::new(dev.as_ref())
     }
 
+    #[must_use]
     #[inline]
     pub fn format(&self) -> wgpu::TextureFormat {
         self.inner.format()
@@ -21,10 +22,10 @@ impl Texture {
 
     #[inline]
     pub(crate) fn texture_view_dimension(&self) -> wgpu::TextureViewDimension {
-        if self.size().depth_or_array_layers != 1 {
-            wgpu::TextureViewDimension::D2Array
-        } else {
+        if self.size().depth_or_array_layers == 1 {
             wgpu::TextureViewDimension::D2
+        } else {
+            wgpu::TextureViewDimension::D2Array
         }
     }
 
@@ -92,6 +93,7 @@ impl Texture {
         )
     }
 
+    #[must_use]
     #[inline]
     pub fn render_attach(&self) -> RenderAttachment {
         RenderAttachment::new(self.view())
@@ -151,8 +153,9 @@ pub struct TextureBuilder<'a> {
 }
 
 impl<'a> TextureBuilder<'a> {
+    #[must_use]
     #[inline]
-    pub fn new(dev: &'a wgpu::Device) -> Self {
+    pub const fn new(dev: &'a wgpu::Device) -> Self {
         Self {
             dev,
             label: None,
@@ -163,31 +166,36 @@ impl<'a> TextureBuilder<'a> {
         }
     }
 
+    #[must_use]
     #[inline]
-    pub fn label(mut self, label: &'a str) -> Self {
+    pub const fn label(mut self, label: &'a str) -> Self {
         self.label = Some(label);
         self
     }
 
+    #[must_use]
     #[inline]
-    pub fn size(mut self, width: usize, height: usize) -> Self {
+    pub const fn size(mut self, width: usize, height: usize) -> Self {
         self.width = width as _;
         self.height = height as _;
         self
     }
 
+    #[must_use]
     #[inline]
-    pub fn layers(mut self, layers: usize) -> Self {
+    pub const fn layers(mut self, layers: usize) -> Self {
         self.layers = layers as _;
         self
     }
 
+    #[must_use]
     #[inline]
     fn with_usage(mut self, usage: wgpu::TextureUsages) -> Self {
         self.usage |= usage;
         self
     }
 
+    #[must_use]
     #[inline]
     pub fn storage(mut self) -> Self {
         self.usage |= wgpu::TextureUsages::STORAGE_BINDING;
@@ -195,21 +203,25 @@ impl<'a> TextureBuilder<'a> {
         self
     }
 
+    #[must_use]
     #[inline]
     pub fn render_target(self) -> Self {
         self.with_usage(wgpu::TextureUsages::RENDER_ATTACHMENT)
     }
 
+    #[must_use]
     #[inline]
     pub fn readable(self) -> Self {
         self.with_usage(wgpu::TextureUsages::COPY_SRC)
     }
 
+    #[must_use]
     #[inline]
     pub fn writable(self) -> Self {
         self.with_usage(wgpu::TextureUsages::COPY_DST)
     }
 
+    #[must_use]
     #[inline]
     pub fn build(self) -> Texture {
         let inner = self.dev.create_texture(&wgpu::TextureDescriptor {

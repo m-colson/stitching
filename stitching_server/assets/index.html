@@ -38,8 +38,14 @@
              */
             handleMessage(ev) {
                 if (ev.data instanceof ArrayBuffer) {
-                    this.currData.data.set(new Uint8Array(ev.data.slice(8)));
+                    let serverSend = new Float64Array(ev.data.slice(8, 16))[0];
+                    let clientRecv = performance.now();
+
+                    this.currData.data.set(new Uint8Array(ev.data.slice(16)));
                     this.syncView();
+
+                    let clientSend = performance.now();
+                    this.#sendTiming(serverSend, clientRecv, clientSend);
                 } else {
                     console.error("unhandled data type for message", ev)
                 }
@@ -50,6 +56,25 @@
              */
             handleClose(ev) {
                 console.log("WebSocket connection closed:", ev);
+            }
+
+            /**
+             * @param {DOMHighResTimeStamp} serverSend
+             * @param {DOMHighResTimeStamp} clientRecv
+             * @param {DOMHighResTimeStamp} clientSend
+             */
+            #sendTiming(serverSend, clientRecv, clientSend) {
+                let buf = new ArrayBuffer(4 * 8);
+
+                let kindView = new Uint8Array(buf, 0, 1);
+                kindView[0] = 4; // Timing Packet Kind
+
+                let stampsView = new Float64Array(buf, 8);
+                stampsView[0] = serverSend;
+                stampsView[1] = clientRecv;
+                stampsView[2] = clientSend;
+
+                this.conn.send(buf);
             }
 
             syncView() {

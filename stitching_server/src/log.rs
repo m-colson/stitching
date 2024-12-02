@@ -7,7 +7,7 @@ pub fn initialize(filter: impl Into<EnvFilter>) {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| filter.into()),
         )
         .with(tracing_subscriber::fmt::layer())
-        .init()
+        .init();
 }
 
 pub fn http_trace_layer(

@@ -24,6 +24,7 @@ Uses a websocket at */video* with the following binary protocol:
 | height        | u16                                 |
 | bytes_per_pix | u8                                  |
 | __reserved    | *2 bytes*                           |
+| send_millis   | f64                                 |
 | data          | [width * height * bytes_per_pix] u8 |
 
 ### Update Bounds

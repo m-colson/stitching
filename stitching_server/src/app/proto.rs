@@ -1,34 +1,35 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 
 use axum::extract::ws::Message;
-use stitch::{
-    frame::{FrameBuffer, FrameBufferMut, FrameSize},
-    proj::ProjStyle,
-};
-use zerocopy::{FromBytes, FromZeros, IntoBytes};
+use stitch::{buf::FrameSize, proj::ProjectionStyle};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 enum PacketKind {
     Nop = 0,
     SettingsSync = 1,
     UpdateFrame = 2,
-    UpdateBounds = 3,
+    Timing = 4,
 }
 
-#[allow(dead_code)]
-pub enum Packet {
+pub enum RecvPacket {
     Nop,
     SettingsSync(SettingsPacket),
-    UpdateFrame(VideoPacket),
+    Timing(TimingPacket),
 }
 
-impl Packet {
+impl RecvPacket {
     pub fn from_raw(data: &[u8]) -> Option<Self> {
         (data[0] == PacketKind::Nop as _)
             .then_some(Self::Nop)
             .or_else(|| SettingsPacket::from_raw(data).map(Self::SettingsSync))
+            .or_else(|| TimingPacket::from_raw(data).map(Self::Timing))
     }
 }
 
@@ -40,17 +41,17 @@ pub struct SettingsPacket {
 }
 
 impl SettingsPacket {
-    #[allow(dead_code)]
-    #[inline]
-    pub fn new(style: ProjStyle) -> Self {
-        Self {
-            _kind: PacketKind::SettingsSync,
-            view_type: match style {
-                ProjStyle::RawCamera(n) => n as _,
-                ProjStyle::Hemisphere { .. } => 255,
-            },
-        }
-    }
+    // remains for future reference
+    // #[inline]
+    // pub const fn new(style: ProjectionStyle) -> Self {
+    //     Self {
+    //         _kind: PacketKind::SettingsSync,
+    //         view_type: match style {
+    //             ProjectionStyle::RawCamera(n) => n as _,
+    //             ProjectionStyle::Hemisphere { .. } => 255,
+    //         },
+    //     }
+    // }
 
     #[inline]
     pub fn from_raw(data: &[u8]) -> Option<Self> {
@@ -61,10 +62,13 @@ impl SettingsPacket {
     }
 
     #[inline]
-    pub fn view_type(self, radius: f32) -> ProjStyle {
+    pub const fn view_type(self, radius: f32) -> ProjectionStyle {
         match self.view_type {
-            255 => ProjStyle::Hemisphere { radius },
-            n => ProjStyle::RawCamera(n as _),
+            255 => ProjectionStyle::Hemisphere {
+                pos: [0., 0., 100.], // TODO
+                radius,
+            },
+            n => ProjectionStyle::RawCamera(n as _),
         }
     }
 }
@@ -73,23 +77,32 @@ pub struct VideoPacket<O: zerocopy::ByteOrder = zerocopy::LittleEndian>(Box<[u8]
 
 impl<O: zerocopy::ByteOrder> VideoPacket<O> {
     #[inline]
-    pub fn new(width: usize, height: usize, chans: usize) -> Self {
-        let mut inner = <[u8]>::new_box_zeroed_with_elems(width * height * chans + 8).unwrap();
+    pub fn new(width: usize, height: usize, chans: usize) -> stitch::Result<Self> {
+        let mut inner = <[u8]>::new_box_zeroed_with_elems(width * height * chans + 16).unwrap();
         inner[0] = PacketKind::UpdateFrame as _;
-        zerocopy::U16::<O>::new(width as u16)
+        zerocopy::U16::<O>::new(width.try_into()?)
             .write_to(&mut inner[1..3])
             .unwrap();
-        zerocopy::U16::<O>::new(height as u16)
+        zerocopy::U16::<O>::new(height.try_into()?)
             .write_to(&mut inner[3..5])
             .unwrap();
-        inner[5] = chans as u8;
+        inner[5] = chans.try_into()?;
 
-        Self(inner, PhantomData)
+        Ok(Self(inner, PhantomData))
+    }
+
+    #[inline]
+    pub fn update_time(&mut self) {
+        zerocopy::F64::<O>::new(TimingPacket::new_now().server_send)
+            .write_to(&mut self.0[8..16])
+            .unwrap();
     }
 
     #[inline]
     pub fn take_message(&mut self) -> Message {
-        let new_buf = Self::new(self.width(), self.height(), self.chans()).0;
+        let new_buf = Self::new(self.width(), self.height(), self.chans())
+            .expect("dimension should already be safe if this type exists")
+            .0;
         let old_buf = std::mem::replace(&mut self.0, new_buf);
         Message::Binary(old_buf.into_vec())
     }
@@ -113,14 +126,63 @@ impl<O: zerocopy::ByteOrder> FrameSize for VideoPacket<O> {
     }
 }
 
-impl<O: zerocopy::ByteOrder> FrameBuffer for VideoPacket<O> {
-    fn as_bytes(&self) -> &[u8] {
-        &self.0[8..]
+impl<O: zerocopy::ByteOrder> Deref for VideoPacket<O> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[16..]
     }
 }
 
-impl<O: zerocopy::ByteOrder> FrameBufferMut for VideoPacket<O> {
-    fn as_bytes_mut(&mut self) -> &mut [u8] {
-        &mut self.0[8..]
+impl<O: zerocopy::ByteOrder> DerefMut for VideoPacket<O> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0[16..]
+    }
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Clone, Copy, Debug)]
+pub struct TimingPacket {
+    _kind: u64,
+    pub server_send: f64,
+    pub client_recv: f64,
+    pub client_send: f64,
+}
+
+impl TimingPacket {
+    #[inline]
+    fn base_instant() -> &'static Instant {
+        static START_TIME: OnceLock<Instant> = OnceLock::new();
+        START_TIME.get_or_init(Instant::now)
+    }
+
+    #[inline]
+    pub fn new_now() -> Self {
+        let server_send = Self::base_instant().elapsed();
+        Self {
+            _kind: PacketKind::Timing as _,
+            server_send: server_send.as_secs_f64() * 1000.,
+            client_recv: f64::NAN,
+            client_send: f64::NAN,
+        }
+    }
+
+    pub fn from_raw(data: &[u8]) -> Option<Self> {
+        if data[0] != PacketKind::Timing as _ {
+            return None;
+        }
+
+        Self::ref_from_bytes(data).ok().copied()
+    }
+
+    #[inline]
+    pub fn info_now(self) -> (Duration, Duration) {
+        let server_recv = Self::base_instant().elapsed().as_secs_f64() * 1000.;
+
+        let client_millis = self.client_send - self.client_recv;
+        let round_trip = (server_recv - self.server_send) - client_millis;
+        (
+            Duration::from_secs_f64(client_millis / 1000.),
+            Duration::from_secs_f64(round_trip / 1000.),
+        )
     }
 }

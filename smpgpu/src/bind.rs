@@ -11,10 +11,14 @@ pub struct Bindings<'a> {
 }
 
 impl<'a> Bindings<'a> {
+    #[must_use]
+    #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
+    #[inline]
     pub fn bind(mut self, txt: impl Bindable<'a>) -> Self {
         let vis = txt.as_visibility();
         let (ty, recs) = txt.into_binding();
@@ -96,7 +100,8 @@ impl<'a> BindResource<'a> {
 pub struct VisBindable<'a, T: Bindable<'a>>(T, wgpu::ShaderStages, PhantomData<&'a ()>);
 
 impl<'a, T: Bindable<'a>> VisBindable<'a, T> {
-    pub fn new(inner: T, stages: wgpu::ShaderStages) -> Self {
+    #[inline]
+    pub const fn new(inner: T, stages: wgpu::ShaderStages) -> Self {
         Self(inner, stages, PhantomData)
     }
 }

@@ -1,9 +1,9 @@
 use axum::extract::ws::Message;
 use stitch::{
-    camera::{Camera, CameraSpec, LiveSpec},
-    frame::FrameSize,
-    loader::{block_discard_tickets, FrameLoader, LoadingBuffer, OwnedWriteBuffer},
-    proj::{GpuDirectBufferWrite, GpuProjector, ProjSpec},
+    buf::FrameSize,
+    camera::{live, Camera},
+    loader::{self, Loader, OwnedWriteBuffer},
+    proj::{self, GpuDirectBufferWrite, GpuProjector, ProjectionStyle},
     Result,
 };
 
@@ -11,8 +11,7 @@ use crate::util::IntervalTimer;
 
 use super::proto::VideoPacket;
 pub enum UpdateFn {
-    ProjCameraSpec(Box<dyn FnOnce(&mut CameraSpec) + Send>),
-    ProjSpec(Box<dyn FnOnce(&mut ProjSpec) + Send>),
+    ProjSpec(Box<dyn FnOnce(&mut ProjectionStyle) + Send>),
 }
 
 pub struct Sticher {
@@ -22,30 +21,36 @@ pub struct Sticher {
 
 impl Sticher {
     pub async fn from_cfg_gpu(
-        cfg: stitch::Config<LiveSpec>,
+        cfg: proj::Config<live::Config>,
         proj_w: usize,
         proj_h: usize,
-        cam_w: usize,
-        cam_h: usize,
     ) -> Self {
-        let proj = GpuProjector::new_auto(proj_w, proj_h, (cam_w, cam_h, cfg.cameras.len()))
+        let cam_res = cfg.cameras[0]
+            .meta
+            .resolution
+            .expect("missing resolution for camera 0");
+
+        let proj = GpuProjector::builder_auto()
             .await
-            .unwrap();
+            .unwrap()
+            .input_size(
+                cam_res[0],
+                cam_res[1],
+                cfg.cameras.len().try_into().unwrap(),
+            )
+            .out_size(proj_w, proj_h)
+            .flat_bound()
+            .masks_from_cfgs(&cfg.cameras)
+            .build();
+
         let (msg_send, msg_recv) = kanal::bounded(0);
         let (update_send, update_recv) = kanal::bounded(4);
 
         tokio::task::spawn_blocking(move || {
-            let inner: SticherInner<GpuDirectBufferWrite> = SticherInner::from_cfg(
-                cfg,
-                (proj_w, proj_h),
-                (cam_w, cam_h),
-                msg_send,
-                update_recv,
-                LoadingBuffer::new_none,
-            )
-            .unwrap();
+            let inner =
+                SticherInner::from_cfg(&cfg, (proj_w, proj_h), msg_send, update_recv).unwrap();
 
-            SticherInner::block(inner, proj);
+            SticherInner::block(inner, &proj);
         });
 
         Self {
@@ -58,45 +63,32 @@ impl Sticher {
         self.msg_recv.recv().await.ok()
     }
 
-    pub fn update_cam_spec<F: FnOnce(&mut CameraSpec) + Send + 'static>(&self, f: F) {
-        _ = self.update_send.send(UpdateFn::ProjCameraSpec(Box::new(f)))
-    }
-
-    pub fn update_ty<F: FnOnce(&mut ProjSpec) + Send + 'static>(&self, f: F) {
-        _ = self.update_send.send(UpdateFn::ProjSpec(Box::new(f)))
+    pub fn update_style<F: FnOnce(&mut ProjectionStyle) + Send + 'static>(&self, f: F) {
+        _ = self.update_send.send(UpdateFn::ProjSpec(Box::new(f)));
     }
 }
 
 struct SticherInner<B: OwnedWriteBuffer> {
     pub sender: kanal::Sender<Message>,
     pub update_chan: kanal::Receiver<UpdateFn>,
-    pub proj_cam_spec: CameraSpec,
-    pub proj_ty: ProjSpec,
+    pub proj_style: ProjectionStyle,
     pub proj_buf: VideoPacket,
-    pub cams: Vec<Camera<LoadingBuffer<(), B>>>,
+    pub cams: Vec<Camera<Loader<B>>>,
 }
 
-impl<B: OwnedWriteBuffer + 'static> SticherInner<B>
-where
-    LoadingBuffer<(), B>: FrameSize,
-{
+impl<B: OwnedWriteBuffer + 'static> SticherInner<B> {
     pub fn from_cfg(
-        cfg: stitch::Config<LiveSpec>,
+        cfg: &proj::Config<live::Config>,
         proj_size: (usize, usize),
-        cam_size: (usize, usize),
         sender: kanal::Sender<Message>,
         update_chan: kanal::Receiver<UpdateFn>,
-        buf_maker: impl Fn(FrameLoader<B>) -> LoadingBuffer<(), B> + Clone,
     ) -> Result<Self> {
         let cams = cfg
             .cameras
             .iter()
             .map(|cfg| {
-                let cam = cfg
-                    .clone()
-                    .load(cam_size.0 as _, cam_size.1 as _)?
-                    .map_with_meta(buf_maker.clone());
-                let (w, h, c) = cam.buf.frame_size();
+                let cam = cfg.clone().load()?;
+                let (w, h, c) = cam.data.frame_size();
                 tracing::info!("loaded camera {:?} ({w} * {h} * {c})", cfg.meta.live_index);
                 Ok(cam)
             })
@@ -107,30 +99,29 @@ where
         Ok(Self {
             sender,
             update_chan,
-            proj_cam_spec: cfg
-                .proj
-                .spec
-                .with_dims(proj_size.0 as f32, proj_size.1 as f32),
-            proj_ty: cfg.proj.meta,
-            proj_buf: VideoPacket::new(proj_size.0, proj_size.1, 4),
+            proj_style: cfg.style,
+            proj_buf: VideoPacket::new(proj_size.0, proj_size.1, 4)?,
             cams,
         })
     }
 }
 
 impl SticherInner<GpuDirectBufferWrite> {
-    pub fn block(mut self, proj: GpuProjector) {
+    pub fn block(mut self, proj: &GpuProjector) {
+        // first frame load takes much longer, do it before we starting profiling.
+        loader::block_discard_tickets(proj.take_input_buffers(&self.cams).unwrap());
+
         let mut timer = IntervalTimer::new();
         while self.avail_updates() {
             timer.start();
-            let buf_tickets = proj.take_input_buffers(&self.cams);
+            let buf_tickets = proj.take_input_buffers(&self.cams).unwrap();
 
             proj.update_cam_specs(&self.cams);
-            proj.update_proj_view(self.proj_cam_spec, self.proj_ty.style);
+            proj.update_proj_view(self.proj_style);
 
             timer.mark("setup");
 
-            block_discard_tickets(buf_tickets);
+            loader::block_discard_tickets(buf_tickets);
 
             timer.mark("frame load");
 
@@ -139,8 +130,13 @@ impl SticherInner<GpuDirectBufferWrite> {
 
             timer.mark("backward");
 
+            self.proj_buf.update_time();
+            timer.mark_from_base("generation");
+
             let msg = self.proj_buf.take_message();
-            self.sender.send(msg).unwrap();
+            if self.sender.send(msg).is_err() {
+                break;
+            }
 
             timer.mark("handoff");
             timer.log_iters_per_sec("render");
@@ -154,8 +150,7 @@ impl SticherInner<GpuDirectBufferWrite> {
         loop {
             match self.update_chan.try_recv() {
                 Ok(Some(msg)) => match msg {
-                    UpdateFn::ProjCameraSpec(f) => f(&mut self.proj_cam_spec),
-                    UpdateFn::ProjSpec(f) => f(&mut self.proj_ty),
+                    UpdateFn::ProjSpec(f) => f(&mut self.proj_style),
                 },
                 Ok(None) => return true,
                 Err(_) => return false,

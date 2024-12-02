@@ -48,17 +48,20 @@ pub struct SamplerBuilder<'a> {
 }
 
 impl<'a> SamplerBuilder<'a> {
+    #[must_use]
     #[inline]
-    pub fn new(dev: &'a wgpu::Device) -> Self {
+    pub const fn new(dev: &'a wgpu::Device) -> Self {
         Self { dev, label: None }
     }
 
+    #[must_use]
     #[inline]
-    pub fn label(mut self, label: &'a str) -> Self {
+    pub const fn label(mut self, label: &'a str) -> Self {
         self.label = Some(label);
         self
     }
 
+    #[must_use]
     #[inline]
     pub fn build(self) -> Sampler {
         let inner = self.dev.create_sampler(&SamplerDescriptor {

@@ -1,11 +1,8 @@
 use crate::{
+    buf::{FrameBufferView, FrameSize},
     camera::Camera,
-    frame::{FrameBufferView, ToFrameBuffer},
-    FrameSize,
+    Error, Result,
 };
-
-use zerocopy::FromZeros;
-
 pub trait OwnedWriteBuffer {
     type View<'a>: AsMut<[u8]>
     where
@@ -22,18 +19,19 @@ impl<T: std::ops::DerefMut<Target = [u8]>> OwnedWriteBuffer for T {
     }
 }
 
-pub struct FrameLoader<B: OwnedWriteBuffer> {
+#[derive(Clone, Debug)]
+pub struct Loader<B: OwnedWriteBuffer> {
     req_send: kanal::Sender<(B, kanal::OneshotSender<B>)>,
-    width: u16,
-    height: u16,
-    chans: u16,
+    width: u32,
+    height: u32,
+    chans: u32,
 }
 
-impl<B: OwnedWriteBuffer + 'static> FrameLoader<B> {
+impl<B: OwnedWriteBuffer + 'static> Loader<B> {
     pub fn new_blocking(
-        width: usize,
-        height: usize,
-        chans: usize,
+        width: u32,
+        height: u32,
+        chans: u32,
         mut cb: impl FnMut(&mut [u8]) + Send + 'static,
     ) -> Self {
         let (req_send, req_recv) = kanal::bounded::<(B, kanal::OneshotSender<B>)>(4);
@@ -48,37 +46,30 @@ impl<B: OwnedWriteBuffer + 'static> FrameLoader<B> {
 
         Self {
             req_send,
-            width: width as _,
-            height: height as _,
-            chans: chans as _,
+            width,
+            height,
+            chans,
         }
     }
 
-    pub fn give(&self, buf: B) -> FrameLoaderTicket<B> {
+    /// # Errors
+    /// loader doesn't exist anymore
+    pub fn give(&self, buf: B) -> Result<Ticket<B>> {
         let (buf_send, buf_recv) = kanal::oneshot();
-        self.req_send.send((buf, buf_send)).unwrap();
-        FrameLoaderTicket(buf_recv)
+        self.req_send
+            .send((buf, buf_send))
+            .map_err(|_| Error::BufferLost)
+            .map(|()| Ticket(buf_recv))
     }
 }
 
-impl<B: OwnedWriteBuffer> FrameLoader<B> {
-    pub fn with_buffer<T>(self, buf: T) -> LoadingBuffer<T, B> {
-        LoadingBuffer::new(self, buf)
-    }
-}
-
-impl<T: From<Box<[u8]>>, B: OwnedWriteBuffer> From<FrameLoader<B>> for LoadingBuffer<T, B> {
-    fn from(value: FrameLoader<B>) -> Self {
-        let buf = <[u8]>::new_box_zeroed_with_elems(value.num_bytes())
-            .unwrap()
-            .into();
-        value.with_buffer(buf)
-    }
-}
-
-pub async fn collect_empty_camera_tickets<B: OwnedWriteBuffer, K>(
-    tickets: Vec<FrameLoaderTicket<B>>,
-    cams: &[Camera<LoadingBuffer<(), B>, K>],
+pub async fn collect_empty_camera_tickets<
+    B: OwnedWriteBuffer + Send,
+    K: Sync,
+    T: FrameSize + Sync,
+>(
+    tickets: Vec<Ticket<B>>,
+    cams: &[Camera<T>],
 ) -> Vec<Camera<FrameBufferView<'static>>> {
     futures::future::join_all(cams.iter().zip(tickets).map(|(c, ticket)| {
         c.with_map_fut(|b| async {
@@ -90,25 +81,35 @@ pub async fn collect_empty_camera_tickets<B: OwnedWriteBuffer, K>(
 }
 
 #[inline]
-pub fn block_discard_tickets<B: OwnedWriteBuffer>(tickets: Vec<FrameLoaderTicket<B>>) {
+pub fn block_discard_tickets<B: OwnedWriteBuffer>(tickets: Vec<Ticket<B>>) {
     for ticket in tickets {
         _ = ticket.block_take();
     }
 }
 
-pub struct FrameLoaderTicket<R>(kanal::OneshotReceiver<R>);
+pub struct Ticket<R>(kanal::OneshotReceiver<R>);
 
-impl<R> FrameLoaderTicket<R> {
-    pub fn block_take(self) -> R {
-        self.0.recv().unwrap()
-    }
-
-    pub async fn take(self) -> R {
-        self.0.to_async().recv().await.unwrap()
+impl<R> Ticket<R> {
+    /// # Errors
+    /// loading thread exited
+    pub fn block_take(self) -> Result<R> {
+        self.0.recv().map_err(|_| Error::BufferLost)
     }
 }
 
-impl<B: OwnedWriteBuffer> FrameSize for FrameLoader<B> {
+impl<R: Send> Ticket<R> {
+    /// # Errors
+    /// loading thread exited
+    pub async fn take(self) -> Result<R> {
+        self.0
+            .to_async()
+            .recv()
+            .await
+            .map_err(|_| Error::BufferLost)
+    }
+}
+
+impl<B: OwnedWriteBuffer> FrameSize for Loader<B> {
     fn width(&self) -> usize {
         self.width as _
     }
@@ -119,89 +120,5 @@ impl<B: OwnedWriteBuffer> FrameSize for FrameLoader<B> {
 
     fn chans(&self) -> usize {
         self.chans as _
-    }
-}
-
-pub struct LoadingBuffer<T, B: OwnedWriteBuffer> {
-    loader: FrameLoader<B>,
-    inner: Option<T>,
-}
-
-impl<T, B: OwnedWriteBuffer> LoadingBuffer<T, B> {
-    #[inline]
-    pub fn new(loader: FrameLoader<B>, inner: T) -> Self {
-        Self {
-            loader,
-            inner: Some(inner),
-        }
-    }
-}
-
-impl<B: OwnedWriteBuffer + 'static> LoadingBuffer<(), B> {
-    #[inline]
-    pub fn new_none(loader: FrameLoader<B>) -> Self {
-        Self::new(loader, ())
-    }
-
-    #[inline]
-    pub fn begin_load_with(&self, buf: B) -> FrameLoaderTicket<B> {
-        self.loader.give(buf)
-    }
-}
-
-impl<B: OwnedWriteBuffer + 'static> LoadingBuffer<B, B> {
-    #[inline]
-    pub fn begin_load(&mut self) -> Option<FrameLoaderTicket<B>> {
-        self.inner.take().map(|buf| self.loader.give(buf))
-    }
-
-    #[inline]
-    pub fn block_attach(&mut self, ticket: FrameLoaderTicket<B>) {
-        self.inner.replace(ticket.block_take());
-    }
-
-    #[inline]
-    pub async fn attach(&mut self, ticket: FrameLoaderTicket<B>) {
-        self.inner.replace(ticket.take().await);
-    }
-}
-
-impl<T: AsRef<[u8]>, B: OwnedWriteBuffer> LoadingBuffer<T, B>
-where
-    Self: FrameSize,
-{
-    pub fn as_view(&self) -> FrameBufferView<'_> {
-        FrameBufferView::new(self.frame_size(), self.inner.as_ref().unwrap().as_ref())
-    }
-}
-
-impl<T, B: OwnedWriteBuffer> LoadingBuffer<T, B>
-where
-    Self: FrameSize,
-{
-    pub fn as_empty_view(&self) -> FrameBufferView<'static> {
-        FrameBufferView::new(self.frame_size(), &[])
-    }
-}
-
-impl<T, B: OwnedWriteBuffer> FrameSize for LoadingBuffer<T, B> {
-    fn width(&self) -> usize {
-        self.loader.width as _
-    }
-
-    fn height(&self) -> usize {
-        self.loader.height as _
-    }
-
-    fn chans(&self) -> usize {
-        self.loader.chans as _
-    }
-}
-
-impl<'a, T: AsRef<[u8]>, B: OwnedWriteBuffer> ToFrameBuffer<'a> for LoadingBuffer<T, B> {
-    type Output = FrameBufferView<'a>;
-
-    fn to_frame_buf(&'a self) -> Self::Output {
-        self.as_view()
     }
 }

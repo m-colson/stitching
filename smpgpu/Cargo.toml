@@ -3,11 +3,13 @@ name = "smpgpu"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+tokio = ["dep:tokio", "dep:futures"]
+
 [dependencies]
 encase = "0.10.0"
-futures.workspace = true
+futures = { workspace = true, optional = true }
 kanal.workspace = true
 thiserror = "2.0.3"
-tracing.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, optional = true }
 wgpu = { version = "23.0.0", default-features = false, features = ["wgsl"] }

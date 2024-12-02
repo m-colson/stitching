@@ -1,156 +1,102 @@
-use std::{f32::consts::PI, future::Future};
+use std::future::Future;
 
 use serde::{Deserialize, Serialize};
 
-mod img;
-pub use img::ImageSpec;
-
 #[cfg(feature = "live")]
 pub mod live;
-#[cfg(feature = "live")]
-pub use live::{live_camera_loader, LiveSpec};
 
-mod group;
-pub use group::{CameraGroup, CameraGroupAsync};
-
-use crate::frame::{FrameBuffer, ToFrameBuffer, ToFrameBufferAsync};
+use crate::{
+    buf::FrameSize,
+    loader::{Loader, OwnedWriteBuffer},
+};
 
 #[derive(Clone, Debug)]
-pub struct Camera<T, K = ()> {
-    pub spec: CameraSpec,
-    pub meta: K,
-    pub buf: T,
+pub struct Camera<T> {
+    pub view: ViewParams,
+    pub data: T,
 }
 
-impl<T, K> Camera<T, K> {
+impl<T> Camera<T> {
     #[inline]
-    pub fn new(spec: CameraSpec, meta: K, buf: T) -> Self {
-        Self { spec, meta, buf }
-    }
-
-    #[inline]
-    pub fn map<N>(self, f: impl FnOnce(T) -> N) -> Camera<N> {
-        Camera {
-            spec: self.spec,
-            meta: (),
-            buf: f(self.buf),
-        }
-    }
-
-    #[inline]
-    pub fn map_with_meta<N>(self, f: impl FnOnce(T) -> N) -> Camera<N, K>
-    where
-        K: Clone,
-    {
-        Camera {
-            spec: self.spec,
-            meta: self.meta.clone(),
-            buf: f(self.buf),
-        }
+    pub const fn new(view: ViewParams, data: T) -> Self {
+        Self { view, data }
     }
 
     #[inline]
     pub fn with_map<N>(&self, f: impl FnOnce(&T) -> N) -> Camera<N> {
         Camera {
-            spec: self.spec,
-            meta: (),
-            buf: f(&self.buf),
+            view: self.view,
+            data: f(&self.data),
         }
     }
 
+    #[allow(clippy::future_not_send)]
     #[inline]
     pub async fn with_map_fut<'a, N, Fut: Future<Output = N>>(
         &'a self,
         f: impl FnOnce(&'a T) -> Fut,
     ) -> Camera<N> {
         Camera {
-            spec: self.spec,
-            meta: (),
-            buf: f(&self.buf).await,
+            view: self.view,
+            data: f(&self.data).await,
         }
     }
 }
 
-impl<T: Default, K> Camera<T, K> {
-    #[inline]
-    pub fn new_default(spec: CameraSpec, meta: K) -> Self {
-        Self {
-            spec,
-            meta,
-            buf: T::default(),
-        }
-    }
-}
-
-impl<T: FrameBuffer + Default, K> From<crate::config::CameraConfig<K>> for Camera<T, K> {
-    #[inline]
-    fn from(value: crate::config::CameraConfig<K>) -> Self {
-        Self::new_default(value.spec, value.meta)
-    }
-}
-
-impl<T: FrameBuffer, K> Camera<T, K> {
-    #[inline]
-    pub fn at(&self, x: f32, y: f32) -> Option<&[u8]> {
-        let x = x + 0.5;
-        let y = y + 0.5;
-        if !(0.0..1.).contains(&x) || !(0.0..1.).contains(&y) {
-            return None;
-        }
-
-        let width = self.width();
-        let height = self.height();
-        let chans = self.chans();
-
-        let sx = (x * width as f32) as usize;
-        let sy = (y * height as f32) as usize;
-
-        // if let Some(mask) = mask {
-        //     if mask.get_pixel(sx, sy).0[0] == 0 {
-        //         return None;
-        //     }
-        // }
-
-        Some(&self.buf.as_bytes()[(sx + (sy * width)) * chans..][..chans])
-    }
-
+impl<T: FrameSize> Camera<T> {
     #[inline]
     pub fn width(&self) -> usize {
-        self.buf.width()
+        self.data.width()
     }
     #[inline]
     pub fn height(&self) -> usize {
-        self.buf.height()
+        self.data.height()
     }
     #[inline]
     pub fn chans(&self) -> usize {
-        self.buf.chans()
-    }
-}
-
-impl<'a, T: ToFrameBuffer<'a>, K> Camera<T, K> {
-    #[inline]
-    pub fn to_frame_buf(&'a self) -> Camera<T::Output, ()> {
-        Camera {
-            spec: self.spec,
-            meta: (),
-            buf: self.buf.to_frame_buf(),
-        }
-    }
-}
-
-impl<'a, T: ToFrameBufferAsync<'a>, K> Camera<T, K> {
-    pub async fn to_frame_async(&'a self) -> Camera<T::Output> {
-        Camera {
-            spec: self.spec,
-            meta: (),
-            buf: self.buf.to_frame_async().await,
-        }
+        self.data.chans()
     }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct CameraSpec {
+pub struct Config<K> {
+    #[serde(flatten)]
+    pub view: ViewParams,
+    #[serde(flatten)]
+    pub meta: K,
+}
+
+impl<K> Config<K> {
+    #[must_use]
+    pub fn with_dims(mut self, w: f32, h: f32) -> Self {
+        self.view = self.view.with_dims(w, h);
+        self
+    }
+
+    pub fn with_buffer<B>(self, buf: B) -> Camera<B> {
+        Camera::new(self.view, buf)
+    }
+}
+
+#[cfg(feature = "live")]
+impl<T> Config<T> {
+    /// # Errors
+    /// conversion to loader fails
+    pub fn load<B: OwnedWriteBuffer + 'static>(
+        self,
+    ) -> std::result::Result<Camera<Loader<B>>, T::Error>
+    where
+        T: TryInto<Loader<B>>,
+    {
+        let buf: Loader<_> = self.meta.try_into()?;
+        let (w, h, _) = buf.frame_size();
+
+        Ok(Camera::new(self.view.with_dims(w as f32, h as f32), buf))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct ViewParams {
     pub pos: [f32; 3],
     #[serde(with = "conv_deg_rad")]
     pub pitch: f32,
@@ -158,16 +104,15 @@ pub struct CameraSpec {
     pub azimuth: f32,
     #[serde(default, with = "conv_deg_rad")]
     pub roll: f32,
+    pub sensor: SensorParams,
     #[serde(default)]
-    pub img_off: [f32; 2],
-    pub fov: CameraFov,
-    #[serde(default)]
-    pub lens: CameraLens,
+    pub lens: LensKind,
 }
 
 mod conv_deg_rad {
     use serde::{Deserialize, Deserializer, Serializer};
 
+    #[allow(clippy::trivially_copy_pass_by_ref)]
     pub fn serialize<S>(v: &f32, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -183,66 +128,90 @@ mod conv_deg_rad {
     }
 }
 
-impl CameraSpec {
+impl ViewParams {
     #[inline]
     pub fn set_dims(&mut self, w: f32, h: f32) {
-        self.fov = self.fov.with_aspect(w, h);
+        self.sensor.fov = self.sensor.fov.with_dims(self.lens, w, h);
     }
 
+    #[must_use]
     #[inline]
     pub fn with_dims(mut self, w: f32, h: f32) -> Self {
         self.set_dims(w, h);
         self
     }
+
+    #[must_use]
+    #[inline]
+    pub fn focal_dist(&self, width: f32, height: f32) -> f32 {
+        self.sensor.fov.focal_dist(self.lens, width, height)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub enum CameraFov {
+pub struct SensorParams {
+    #[serde(default)]
+    pub img_off: [f32; 2],
+    pub fov: Fov,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum Fov {
     W(f32),
     H(f32),
     D(f32),
-    WHRadians(f32, f32),
-    Full,
+    FocalDist(f32),
 }
 
-impl CameraFov {
+impl Fov {
+    #[must_use]
     #[inline]
-    pub fn with_aspect(self, width: f32, height: f32) -> Self {
-        match self {
-            CameraFov::W(fw) => {
-                CameraFov::WHRadians(fw.to_radians(), (fw * height / width).to_radians())
-            }
-            CameraFov::H(fh) => {
-                CameraFov::WHRadians((fh * width / height).to_radians(), fh.to_radians())
-            }
-            CameraFov::D(fd) => {
-                let fw = (fd.powi(2) / (1. + (height / width).powi(2))).sqrt();
-                CameraFov::WHRadians(fw.to_radians(), (fw * height / width).to_radians())
-            }
-            CameraFov::WHRadians(_, _) => self,
-            CameraFov::Full => CameraFov::WHRadians(2. * PI, PI / 2.),
-        }
+    pub fn with_dims(self, lens: LensKind, width: f32, height: f32) -> Self {
+        Self::FocalDist(self.focal_dist(lens, width, height))
     }
 
+    #[must_use]
     #[inline]
-    pub fn radians(self) -> (f32, f32) {
-        let Self::WHRadians(x, y) = self else {
-            panic!("can't get radians of {self:?}");
+    pub fn focal_dist(self, lens: LensKind, width: f32, height: f32) -> f32 {
+        let (r, ang) = match self {
+            Self::W(f) => (width / width.hypot(height), f.to_radians() / 2.),
+            Self::H(f) => (height / width.hypot(height), f.to_radians() / 2.),
+            Self::D(f) => (1., f.to_radians() / 2.),
+            Self::FocalDist(d) => return d,
         };
-        (x, y)
+
+        lens.focal_from_rad_ang(r, ang)
     }
 
+    #[must_use]
     #[inline]
-    pub fn diag_radians(self) -> f32 {
-        let (fx, fy) = self.radians();
-        (fx * fx + fy * fy).sqrt()
+    pub const fn assume_focal_dist(self) -> Option<f32> {
+        if let Self::FocalDist(d) = self {
+            Some(d)
+        } else {
+            None
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum CameraLens {
+#[repr(u8)]
+pub enum LensKind {
     #[default]
-    Rectilinear,
-    Equidistant,
+    Rectilinear = 0,
+    Equidistant = 1,
+    Equisolid = 2,
+}
+
+impl LensKind {
+    #[must_use]
+    #[inline]
+    pub fn focal_from_rad_ang(self, r: f32, ang: f32) -> f32 {
+        match self {
+            Self::Rectilinear => r / ang.tan(),
+            Self::Equidistant => r / ang,
+            Self::Equisolid => r / (2. * (ang / 2.).sin()),
+        }
+    }
 }
