@@ -1,7 +1,10 @@
 use crate::{
-    bind::{BindResource, VisBindable},
-    cmd::{CopyOp, EncoderOp, RenderAttachment},
-    Bindable, Buffer,
+    bind::{AsBinding, BindResource},
+    cmd::{
+        render::{ColorAttachment, DepthAttachment},
+        CopyOp, TypeOp,
+    },
+    Buffer,
 };
 
 pub struct Texture {
@@ -33,7 +36,7 @@ impl Texture {
     pub(crate) fn view(&self) -> wgpu::TextureView {
         self.inner.create_view(&wgpu::TextureViewDescriptor {
             label: None,
-            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            format: Some(self.format()),
             dimension: Some(self.texture_view_dimension()),
             aspect: wgpu::TextureAspect::All,
             base_mip_level: 0,
@@ -81,8 +84,9 @@ impl Texture {
             .build()
     }
 
+    #[must_use]
     #[inline]
-    pub fn copy_to_buf_op<'a>(&'a self, buf: &'a Buffer) -> impl EncoderOp + 'a {
+    pub fn copy_to<'a>(&'a self, buf: &'a Buffer) -> impl TypeOp<wgpu::CommandEncoder> + 'a {
         let size = self.size();
         CopyOp::TextBuf(
             self,
@@ -95,15 +99,19 @@ impl Texture {
 
     #[must_use]
     #[inline]
-    pub fn render_attach(&self) -> RenderAttachment {
-        RenderAttachment::new(self.view())
+    pub fn color_attach(&self) -> ColorAttachment {
+        ColorAttachment::new(self.view())
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn depth_attach(&self) -> DepthAttachment {
+        DepthAttachment::new(self.view())
     }
 }
 
-impl<'a> Bindable<'a> for &'a Texture {
-    type VisBind = Self;
-
-    fn into_binding(self) -> (wgpu::BindingType, BindResource<'a>) {
+impl AsBinding for Texture {
+    fn as_binding(&self) -> (wgpu::BindingType, BindResource<'_>) {
         let access: wgpu::StorageTextureAccess = match (
             self.usage().contains(wgpu::TextureUsages::COPY_SRC),
             self.usage().contains(wgpu::TextureUsages::COPY_DST),
@@ -126,21 +134,6 @@ impl<'a> Bindable<'a> for &'a Texture {
 
         (ty, BindResource::TextureView(self.view()))
     }
-
-    #[inline]
-    fn in_compute(self) -> VisBindable<'a, Self::VisBind> {
-        VisBindable::new(self, wgpu::ShaderStages::COMPUTE)
-    }
-
-    #[inline]
-    fn in_vertex(self) -> VisBindable<'a, Self::VisBind> {
-        VisBindable::new(self, wgpu::ShaderStages::VERTEX)
-    }
-
-    #[inline]
-    fn in_frag(self) -> VisBindable<'a, Self::VisBind> {
-        VisBindable::new(self, wgpu::ShaderStages::FRAGMENT)
-    }
 }
 
 pub struct TextureBuilder<'a> {
@@ -149,6 +142,7 @@ pub struct TextureBuilder<'a> {
     width: u32,
     height: u32,
     layers: u32,
+    format: wgpu::TextureFormat,
     usage: wgpu::TextureUsages,
 }
 
@@ -162,6 +156,7 @@ impl<'a> TextureBuilder<'a> {
             width: 0,
             height: 0,
             layers: 1,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING,
         }
     }
@@ -170,6 +165,13 @@ impl<'a> TextureBuilder<'a> {
     #[inline]
     pub const fn label(mut self, label: &'a str) -> Self {
         self.label = Some(label);
+        self
+    }
+
+    #[must_use]
+    #[inline]
+    pub const fn depth(mut self) -> Self {
+        self.format = wgpu::TextureFormat::Depth32Float;
         self
     }
 
@@ -225,7 +227,7 @@ impl<'a> TextureBuilder<'a> {
     #[inline]
     pub fn build(self) -> Texture {
         let inner = self.dev.create_texture(&wgpu::TextureDescriptor {
-            label: None,
+            label: self.label,
             size: wgpu::Extent3d {
                 width: self.width,
                 height: self.height,
@@ -234,7 +236,7 @@ impl<'a> TextureBuilder<'a> {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: self.format,
             usage: self.usage,
             view_formats: &[],
         });

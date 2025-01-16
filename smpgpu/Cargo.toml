@@ -4,12 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-tokio = ["dep:tokio", "dep:futures"]
+tokio_task_poller = ["dep:tokio"]
+obj-file = ["dep:obj-rs"]
 
 [dependencies]
 encase = "0.10.0"
-futures = { workspace = true, optional = true }
+futures = { workspace = true }
+glam = "0.29.2"
 kanal.workspace = true
+obj-rs = { version = "0.7.4", optional = true, default-features = false }
+pollster = "0.4.0"
 thiserror = "2.0.3"
 tokio = { workspace = true, optional = true }
 wgpu = { version = "23.0.0", default-features = false, features = ["wgsl"] }

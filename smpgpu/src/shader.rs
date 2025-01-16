@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+
 use crate::OntoDevice;
 
 #[macro_export]
 macro_rules! include_shader {
     ($vp: literal $(=> $ve: literal)? $(& $fe: literal)?) => {
         ::smpgpu::Shader::new()
-            .module(::smpgpu::reexport::include_wgsl!($vp))
+            .wgsl_module(include_str!($vp))
             $(.entry($ve))?
             $(.frag_entry($fe))?
     };
@@ -28,6 +30,15 @@ impl<'a, 'b> Shader<'a, 'b> {
     pub fn module(mut self, desc: impl Into<Option<wgpu::ShaderModuleDescriptor<'a>>>) -> Self {
         self.desc = desc.into();
         self
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn wgsl_module(self, content: impl Into<Cow<'a, str>>) -> Self {
+        self.module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(content.into()),
+        })
     }
 
     #[must_use]
@@ -62,7 +73,7 @@ pub struct CompiledShader<'b> {
     pub entry: Option<&'b str>,
 }
 
-impl<'a, 'b> OntoDevice<CompiledShader<'b>> for Shader<'a, 'b> {
+impl<'b> OntoDevice<CompiledShader<'b>> for Shader<'_, 'b> {
     fn onto_device(self, dev: &wgpu::Device) -> CompiledShader<'b> {
         CompiledShader {
             module: self.desc.map(|desc| dev.create_shader_module(desc)),
@@ -77,15 +88,15 @@ pub struct RenderShader<'a, 'b> {
     frag: Shader<'a, 'b>,
 }
 
-impl<'a, 'b> RenderShader<'a, 'b> {}
+impl RenderShader<'_, '_> {}
 
-impl<'a, 'b> OntoDevice<CompiledRenderShader<'b>> for Shader<'a, 'b> {
+impl<'b> OntoDevice<CompiledRenderShader<'b>> for Shader<'_, 'b> {
     fn onto_device(self, dev: &wgpu::Device) -> CompiledRenderShader<'b> {
         RenderShader::from(self).onto_device(dev)
     }
 }
 
-impl<'a, 'b> OntoDevice<CompiledRenderShader<'b>> for RenderShader<'a, 'b> {
+impl<'b> OntoDevice<CompiledRenderShader<'b>> for RenderShader<'_, 'b> {
     fn onto_device(self, dev: &wgpu::Device) -> CompiledRenderShader<'b> {
         CompiledRenderShader {
             vert: self.vert.onto_device(dev),

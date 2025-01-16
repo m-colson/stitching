@@ -50,7 +50,7 @@ impl Context {
     }
 
     #[inline]
-    pub fn write_storage<T: ShaderType + WriteInto>(&self, buffer: &Buffer, v: &T) {
+    pub fn write_storage<T: ShaderType + WriteInto + ?Sized>(&self, buffer: &Buffer, v: &T) {
         let mut data = self.write_with(buffer, 0, buffer.size().try_into().unwrap());
         encase::StorageBuffer::new(data.as_mut()).write(v).unwrap();
     }
@@ -141,7 +141,7 @@ impl ContextDeviceBuilder {
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "tokio_task_poller")]
 fn spawn_poller(wake_recv: kanal::Receiver<()>, weak: Weak<Context>) {
     tokio::task::spawn_blocking(move || {
         while wake_recv.recv().is_ok() {
@@ -151,7 +151,7 @@ fn spawn_poller(wake_recv: kanal::Receiver<()>, weak: Weak<Context>) {
     });
 }
 
-#[cfg(not(feature = "tokio"))]
+#[cfg(not(feature = "tokio_task_poller"))]
 fn spawn_poller(wake_recv: kanal::Receiver<()>, weak: Weak<Context>) {
     std::thread::spawn(move || {
         while wake_recv.recv().is_ok() {

@@ -4,6 +4,7 @@ pub trait IntoBindGroup {
     fn into_wgpu_bind_group(self, dev: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::BindGroup);
 }
 
+/// A single group of bindings.
 #[derive(Default)]
 pub struct Bindings<'a> {
     types: Vec<(wgpu::ShaderStages, wgpu::BindingType)>,
@@ -11,24 +12,35 @@ pub struct Bindings<'a> {
 }
 
 impl<'a> Bindings<'a> {
+    /// Create a new group with no bindings.
     #[must_use]
     #[inline]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Add new binding to this group.
     #[must_use]
     #[inline]
-    pub fn bind(mut self, txt: impl Bindable<'a>) -> Self {
-        let vis = txt.as_visibility();
-        let (ty, recs) = txt.into_binding();
+    pub fn bind<T: AsBinding + 'a>(mut self, vis_bind: impl Into<VisBindable<'a, T>>) -> Self {
+        let vis_bind = vis_bind.into();
+        let vis = vis_bind.1;
+        let (ty, recs) = vis_bind.0.as_binding();
         self.types.push((vis, ty));
         self.resources.push(recs);
         self
     }
 }
 
-impl<'a> IntoBindGroup for Bindings<'a> {
+impl<'a, B: AsBinding + 'a> std::ops::BitAnd<VisBindable<'a, B>> for Bindings<'a> {
+    type Output = Self;
+
+    fn bitand(self, rhs: VisBindable<'a, B>) -> Self {
+        self.bind(rhs)
+    }
+}
+
+impl IntoBindGroup for Bindings<'_> {
     fn into_wgpu_bind_group(self, dev: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
         let bind_layout = dev.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
@@ -65,20 +77,24 @@ impl<'a> IntoBindGroup for Bindings<'a> {
     }
 }
 
-pub trait Bindable<'a>: Sized {
-    type VisBind: Bindable<'a> + Sized;
+impl<'a, B1: AsBinding + 'a, B2: AsBinding + 'a> std::ops::BitAnd<VisBindable<'a, B2>>
+    for VisBindable<'a, B1>
+{
+    type Output = Bindings<'a>;
 
-    fn into_binding(self) -> (wgpu::BindingType, BindResource<'a>);
-
-    fn as_visibility(&self) -> wgpu::ShaderStages {
-        wgpu::ShaderStages::all()
+    fn bitand(self, rhs: VisBindable<'a, B2>) -> Self::Output {
+        Bindings::new().bind(self).bind(rhs)
     }
+}
 
-    fn in_compute(self) -> VisBindable<'a, Self::VisBind>;
+impl<'a, B: AsBinding + 'a> IntoBindGroup for VisBindable<'a, B> {
+    fn into_wgpu_bind_group(self, dev: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
+        Bindings::new().bind(self).into_wgpu_bind_group(dev)
+    }
+}
 
-    fn in_vertex(self) -> VisBindable<'a, Self::VisBind>;
-
-    fn in_frag(self) -> VisBindable<'a, Self::VisBind>;
+pub trait AsBinding {
+    fn as_binding(&self) -> (wgpu::BindingType, BindResource<'_>);
 }
 
 pub enum BindResource<'a> {
@@ -97,38 +113,58 @@ impl<'a> BindResource<'a> {
     }
 }
 
-pub struct VisBindable<'a, T: Bindable<'a>>(T, wgpu::ShaderStages, PhantomData<&'a ()>);
+pub struct VisBindable<'a, T>(&'a T, wgpu::ShaderStages, PhantomData<()>);
 
-impl<'a, T: Bindable<'a>> VisBindable<'a, T> {
+impl<'a, T: AsBinding> VisBindable<'a, T> {
     #[inline]
-    pub const fn new(inner: T, stages: wgpu::ShaderStages) -> Self {
+    pub const fn new(inner: &'a T, stages: wgpu::ShaderStages) -> Self {
         Self(inner, stages, PhantomData)
     }
-}
 
-impl<'a, T: Bindable<'a>> Bindable<'a> for VisBindable<'a, T> {
-    type VisBind = T;
-
-    fn into_binding(self) -> (wgpu::BindingType, BindResource<'a>) {
-        self.0.into_binding()
-    }
-
-    fn as_visibility(&self) -> wgpu::ShaderStages {
+    pub fn visibilities(&self) -> wgpu::ShaderStages {
         self.1
     }
 
-    fn in_compute(mut self) -> Self {
+    pub fn in_compute(mut self) -> Self {
         self.1 |= wgpu::ShaderStages::COMPUTE;
         self
     }
 
-    fn in_vertex(mut self) -> Self {
+    pub fn in_vertex(mut self) -> Self {
         self.1 |= wgpu::ShaderStages::VERTEX;
         self
     }
 
-    fn in_frag(mut self) -> Self {
+    pub fn in_frag(mut self) -> Self {
         self.1 |= wgpu::ShaderStages::FRAGMENT;
         self
+    }
+}
+
+/// The `AutoVisBindable` trait allow the in_* functions to be available on all
+/// types that implement [`AsBinding`], without having to first convert it to
+/// [`VisBindable`]
+pub trait AutoVisBindable: AsBinding + Sized {
+    /// Creates a [`VisBindable`] referencing `self` with compute visibility.
+    fn in_compute(&self) -> VisBindable<'_, Self> {
+        VisBindable::new(self, wgpu::ShaderStages::COMPUTE)
+    }
+
+    /// Creates a [`VisBindable`] referencing `self` with vertex visibility.
+    fn in_vertex(&self) -> VisBindable<'_, Self> {
+        VisBindable::new(self, wgpu::ShaderStages::VERTEX)
+    }
+
+    /// Creates a [`VisBindable`] referencing `self` with fragment visibility.
+    fn in_frag(&self) -> VisBindable<'_, Self> {
+        VisBindable::new(self, wgpu::ShaderStages::FRAGMENT)
+    }
+}
+
+impl<T: AsBinding> AutoVisBindable for T {}
+
+impl<'a, T: AsBinding> From<&'a T> for VisBindable<'a, T> {
+    fn from(v: &'a T) -> Self {
+        Self::new(v, wgpu::ShaderStages::empty())
     }
 }

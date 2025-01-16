@@ -1,9 +1,6 @@
 use wgpu::SamplerDescriptor;
 
-use crate::{
-    bind::{BindResource, VisBindable},
-    Bindable,
-};
+use crate::bind::{AsBinding, BindResource};
 
 pub struct Sampler {
     inner: wgpu::Sampler,
@@ -16,29 +13,12 @@ impl Sampler {
     }
 }
 
-impl<'a> Bindable<'a> for &'a Sampler {
-    type VisBind = Self;
-
-    fn into_binding(self) -> (wgpu::BindingType, BindResource<'a>) {
+impl AsBinding for Sampler {
+    fn as_binding(&self) -> (wgpu::BindingType, BindResource<'_>) {
         (
             wgpu::BindingType::Sampler(self.ty),
             BindResource::Sampler(&self.inner),
         )
-    }
-
-    #[inline]
-    fn in_compute(self) -> VisBindable<'a, Self::VisBind> {
-        VisBindable::new(self, wgpu::ShaderStages::COMPUTE)
-    }
-
-    #[inline]
-    fn in_vertex(self) -> VisBindable<'a, Self::VisBind> {
-        VisBindable::new(self, wgpu::ShaderStages::VERTEX)
-    }
-
-    #[inline]
-    fn in_frag(self) -> VisBindable<'a, Self::VisBind> {
-        VisBindable::new(self, wgpu::ShaderStages::FRAGMENT)
     }
 }
 
