@@ -1,0 +1,246 @@
+In archive C:\Users\ninja\third-party\TensorRT-10.7.0.23\lib\nvinfer_10.lib:
+
+nvinfer_10.dll:     file format pe-x86-64
+
+SYMBOL TABLE:
+[  0](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x00000000010174d9 @comp.id
+[  1](sec  2)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$2
+[  3](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  4](sec  4)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  5](sec  5)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __NULL_IMPORT_DESCRIPTOR
+[  7](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 nvinfer_10_NULL_THUNK_DATA
+
+
+
+nvinfer_10.dll:     file format pe-x86-64
+
+SYMBOL TABLE:
+[  0](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x00000000010174d9 @comp.id
+[  1](sec  2)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __NULL_IMPORT_DESCRIPTOR
+
+
+
+nvinfer_10.dll:     file format pe-x86-64
+
+SYMBOL TABLE:
+[  0](sec -1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x00000000010174d9 @comp.id
+[  1](sec  2)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 nvinfer_10_NULL_THUNK_DATA
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_?tensorrt_build_ContainerAdministrator_20241122_86d89b8b44f12565@@3HA
+[  4](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_?tensorrt_version_10_7_0_23@@3HA
+[  4](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_NvOptimusEnablementCuda
+[  4](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_createInferBuilder_INTERNAL
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 createInferBuilder_INTERNAL
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_createInferRefitter_INTERNAL
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 createInferRefitter_INTERNAL
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_createInferRuntime_INTERNAL
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 createInferRuntime_INTERNAL
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_createLeanRuntime
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 createLeanRuntime
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getBuilderPluginRegistry
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getBuilderPluginRegistry
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getBuilderSafePluginRegistry
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getBuilderSafePluginRegistry
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getForwardCompatibilityHelper
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getForwardCompatibilityHelper
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getInferLibBuildVersion
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getInferLibBuildVersion
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getInferLibMajorVersion
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getInferLibMajorVersion
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getInferLibMinorVersion
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getInferLibMinorVersion
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getInferLibPatchVersion
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getInferLibPatchVersion
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getInferLibVersion
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getInferLibVersion
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getLogger
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getLogger
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
+
+nvinfer_10.dll:     file format pei-x86-64
+
+SYMBOL TABLE:
+[  0](sec  0)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$4
+[  1](sec  1)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$5
+[  2](sec  2)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .idata$6
+[  3](sec  1)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __imp_getPluginRegistry
+[  4](sec  3)(fl 0x00)(ty    0)(scl   3) (nx 0) 0x0000000000000000 .text
+[  5](sec  3)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 getPluginRegistry
+[  6](sec  0)(fl 0x00)(ty    0)(scl   2) (nx 0) 0x0000000000000000 __IMPORT_DESCRIPTOR_nvinfer_10
+
+
