@@ -1,13 +1,27 @@
-[style.hemisphere]
-radius = 100
-pos = [0, 0, 100]
+style = "flat"
+
+# [view.orthographic]
+# radius = 120
+# pos = [0, 0, 100]
+
+# [view.perspective]
+# fov_y = 80
+# pos = [0, -16.8, 16.76]
+# look_at = [0, 0, 16]
+
+[view.orbit]
+fov_y = 80
+dist = 50
+z = 30
+look_at = [0, 0, 10]
+frame_per_rev = 500
 
 [[cameras]]
-pos = [0, -18.9, 16.4]
-pitch = 1
-azimuth = 4.2
-roll = -0.3
-sensor = { img_off = [10, 35], fov.W = 146 }
+pos = [0, -16.8, 16.76]
+pitch = 0.15
+azimuth = 1.2
+roll = 0.5
+sensor = { img_off = [0, 33], fov.W = 147.7 }
 lens = "equisolid"
 live_index = 8
 mask_path = "assets/tail-mask.png"
@@ -15,10 +29,10 @@ resolution = [1920, 1080]
 
 [[cameras]]
 pos = [-4.14, -1.93, 6.68]
-pitch = 0
-azimuth = -115
-roll = 0
-sensor = { img_off = [10, 35], fov.W = 146 }
+pitch = 0.3
+azimuth = -116.7
+roll = -0.5
+sensor = { img_off = [0, 33], fov.W = 147.7 }
 lens = "equisolid"
 live_index = 0
 mask_path = "assets/left-mask.png"
@@ -26,10 +40,10 @@ resolution = [1920, 1080]
 
 [[cameras]]
 pos = [4.14, -1.93, 6.68]
-pitch = 0
-azimuth = 115
-roll = 0
-sensor = { img_off = [10, 35], fov.W = 146 }
+pitch = 0.1
+azimuth = 113.3
+roll = 0.4
+sensor = { img_off = [0, 33], fov.W = 147.7 }
 lens = "equisolid"
 live_index = 4
 mask_path = "assets/right-mask.png"

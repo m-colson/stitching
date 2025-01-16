@@ -1,5 +1,12 @@
 [workspace]
-members = ["smpgpu", "stitch", "stitching_server"]
+members = [
+    "smpgpu",
+    "stitch",
+    "stitching_server",
+    "tensorrt",
+    "tensorrt-sys",
+    "trt-yolo",
+]
 resolver = "2"
 
 [workspace.dependencies]
@@ -10,13 +17,13 @@ image = { version = "0.25.4", default-features = false, features = [
 ] }
 kanal = "0.1.0-pre8"
 tokio = { version = "1.41.0", features = ["rt-multi-thread", "sync"] }
-tracing = "0.1.40"
+tracing = { version = "0.1.40", default-features = false }
 
-[workspace.dependencies.nokhwa]
-version = "0.10.4"
-git = "https://github.com/wangjia184/nokhwa.git"
-branch = "0.10"
-features = ["input-native", "output-threaded"]
+# [workspace.dependencies.nokhwa]
+# version = "0.10.4"
+# git = "https://github.com/wangjia184/nokhwa.git"
+# branch = "0.10"
+# features = ["input-native", "output-threaded"]
 
 [profile.dev]
 debug = false
