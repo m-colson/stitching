@@ -79,6 +79,25 @@
 
             syncView() {
                 this.ctx.putImageData(this.currData, 0, 0);
+                // drawDebugGrid()
+            }
+
+            drawDebugGrid() {
+                const rh = 120;
+                const tile = 50.8;
+                const width = 1280;
+                const height = 720;
+                this.ctx.translate(width / 2, height / 2);
+                this.ctx.scale((height / 2) / rh, (height / 2) / rh);
+
+                for (let y = -2; y < 2; y++) {
+                    for (let x = -4; x < 4; x++) {
+                        this.ctx.strokeRect(x * tile, y * tile, tile, tile);
+                    }
+                }
+
+
+                this.ctx.resetTransform()
             }
         }
 

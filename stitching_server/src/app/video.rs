@@ -64,9 +64,9 @@ where
 
             match p {
                 RecvPacket::Nop => {}
-                RecvPacket::SettingsSync(sp) => {
-                    state.update_style(move |proj_spec| {
-                        *proj_spec = sp.view_type(proj_spec.radius());
+                RecvPacket::SettingsSync(_sp) => {
+                    state.update_proj_style(move |_proj_spec| {
+                        // *proj_spec = sp.view_type(proj_spec.radius());
                     });
                 }
                 RecvPacket::Timing(timing) => {

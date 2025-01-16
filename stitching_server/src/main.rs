@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{net::Ipv4Addr, time::Duration};
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use app::App;
 use clap::{Parser, Subcommand};
 use util::Metrics;
@@ -17,10 +17,11 @@ pub async fn main() {
         env!("CARGO_CRATE_NAME")
     ));
 
-    Args::try_parse().unwrap().run().await.unwrap();
+    Args::parse().run().await.unwrap();
 }
 
 #[derive(Clone, Debug, Parser)]
+#[command(author, version, about, long_about = None)]
 pub struct Args {
     #[clap(subcommand)]
     pub cmd: ArgCommand,
@@ -28,39 +29,44 @@ pub struct Args {
 
 impl Args {
     /// # Errors
-    /// errors can occur if the [App] cannot be loaded, or the server fails.
+    /// errors can occur if the [`App`] cannot be loaded, or the server fails.
     pub async fn run(self) -> Result<()> {
         match self.cmd {
-            ArgCommand::Serve { timeout } => {
+            ArgCommand::Serve {
+                timeout,
+                host,
+                port,
+            } => {
                 let app = App::from_toml_cfg("live.toml", 1280, 720).await?;
 
+                let listen = format!("{}:{}", host, port);
                 match timeout {
                     Some(n) => {
                         app.listen_and_serve_until(
-                            "0.0.0.0:2780",
+                            listen,
                             tokio::time::sleep(Duration::from_secs(n)),
                         )
                         .await?;
 
                         Metrics::save_csv("metrics.csv")?;
                     }
-                    None => app.listen_and_serve("0.0.0.0:2780").await?,
+                    None => app.listen_and_serve(listen).await?,
                 };
             }
-            ArgCommand::ListLive => {
-                let cams = nokhwa::query(
-                    nokhwa::native_api_backend()
-                        .ok_or_else(|| anyhow!("no camera backend found"))?,
-                )?;
-                for c in cams {
-                    println!(
-                        "{} -> {:?} ({:?})",
-                        c.index(),
-                        c.human_name(),
-                        c.description()
-                    );
-                }
-            }
+            // ArgCommand::ListLive => {
+            //     let cams = nokhwa::query(
+            //         nokhwa::native_api_backend()
+            //             .ok_or_else(|| anyhow!("no camera backend found"))?,
+            //     )?;
+            //     for c in cams {
+            //         println!(
+            //             "{} -> {:?} ({:?})",
+            //             c.index(),
+            //             c.human_name(),
+            //             c.description()
+            //         );
+            //     }
+            // }
             #[cfg(feature = "capture")]
             ArgCommand::CaptureLive => {
                 let width = 1920;
@@ -91,8 +97,12 @@ pub enum ArgCommand {
     Serve {
         #[arg(short, long)]
         timeout: Option<u64>,
+        #[arg(short, long, default_value = "0.0.0.0")]
+        host: Ipv4Addr,
+        #[arg(short, long, default_value_t = 2780)]
+        port: u16,
     },
-    ListLive,
+    // ListLive,
     #[cfg(feature = "capture")]
     CaptureLive,
 }

@@ -61,13 +61,11 @@ impl SettingsPacket {
         })
     }
 
+    #[allow(dead_code)]
     #[inline]
-    pub const fn view_type(self, radius: f32) -> ProjectionStyle {
+    pub const fn view_type(self) -> ProjectionStyle {
         match self.view_type {
-            255 => ProjectionStyle::Hemisphere {
-                pos: [0., 0., 100.], // TODO
-                radius,
-            },
+            255 => ProjectionStyle::Flat,
             n => ProjectionStyle::RawCamera(n as _),
         }
     }

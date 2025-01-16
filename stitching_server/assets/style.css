@@ -15,7 +15,7 @@ body {
 
 .container {
     width: 80%;
-    max-width: 1200px;
+    max-width: 1500px;
     background-color: #f0f0f0;
     padding: 20px;
     border: 2px solid #333;
@@ -29,9 +29,9 @@ h1 {
     margin-bottom: 20px;
 }
 
-.panorama img {
-    width: 100%;
-    border-radius: 8px;
+.panorama canvas {
+    background-color: #000;
+    border-radius: 16px;
 }
 
 .view-selector {
@@ -61,7 +61,8 @@ h1 {
     margin-top: 20px;
 }
 
-.object-warning, .statistics {
+.object-warning,
+.statistics {
     background-color: #fff;
     border-radius: 8px;
     padding: 15px;
@@ -69,7 +70,8 @@ h1 {
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
-.object-warning h2, .statistics h2 {
+.object-warning h2,
+.statistics h2 {
     font-size: 1.2rem;
     color: #555;
     margin-bottom: 10px;

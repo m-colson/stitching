@@ -6,7 +6,7 @@ use std::{
 };
 
 use axum::{extract::ws::Message, routing::get, Router};
-use stitch::proj::ProjectionStyle;
+use stitch::proj::{ProjectionStyle, ViewStyle};
 use tokio::net::{TcpListener, ToSocketAddrs};
 
 use crate::{log, util::ws_upgrader};
@@ -73,8 +73,13 @@ impl App {
         self.0.stitcher.next_frame_msg().await
     }
 
-    pub fn update_style<F: FnOnce(&mut ProjectionStyle) + Send + 'static>(&self, f: F) {
-        self.0.stitcher.update_style(f);
+    pub fn update_proj_style<F: FnOnce(&mut ProjectionStyle) + Send + 'static>(&self, f: F) {
+        self.0.stitcher.update_proj_style(f);
+    }
+
+    #[allow(dead_code)]
+    pub fn update_view_style<F: FnOnce(&mut ViewStyle) + Send + 'static>(&self, f: F) {
+        self.0.stitcher.update_view_style(f);
     }
 }
 
@@ -88,7 +93,7 @@ impl AppInner {
         tracing::info!("opened config at {:?}", p.as_ref());
 
         Ok(Self {
-            stitcher: Sticher::from_cfg_gpu(cfg, proj_w, proj_h).await,
+            stitcher: Sticher::from_cfg_gpu(cfg, proj_w, proj_h),
         })
     }
 }

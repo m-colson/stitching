@@ -18,26 +18,27 @@ Uses a websocket at */video* with the following binary protocol:
 | view_type     | u8   |
 
 ### Update Frame
-| Field         | Type                                |
-|:------------- |:----------------------------------- |
-| width         | u16                                 |
-| height        | u16                                 |
-| bytes_per_pix | u8                                  |
-| __reserved    | *2 bytes*                           |
-| send_millis   | f64                                 |
-| data          | [width * height * bytes_per_pix] u8 |
+| Field         | Type                                  |
+|:------------- |:------------------------------------- |
+| width         | u16                                   |
+| height        | u16                                   |
+| bytes_per_pix | u8                                    |
+| __reserved    | *3 bytes*                             |
+| send_millis   | f64                                   |
+| data          | \[width * height * bytes_per_pix\] u8 |
 
 ### Update Bounds
 | Field         | Type                  |
 |:------------- |:--------------------- |
 | num_bounds    | u16                   |
-| bounds        | [num_bounds] BoundBox |
+| bounds        | \[num_bounds\] BoundBox |
 
 #### BoundBox
-| Field    | Type |
-|:-------- |:---- |
-| x        | u16  |
-| y        | u16  |
-| width    | u16  |
-| height   | u16  |
-| class_id | u8   |
+| Field        | Type |
+|:------------ |:---- |
+| x            | u16  |
+| y            | u16  |
+| width        | u16  |
+| height       | u16  |
+| class_id     | u8   |
+| conf_decimal | u8   |

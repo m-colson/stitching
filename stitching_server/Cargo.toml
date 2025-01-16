@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 default = ["capture"]
 capture = ["dep:image"]
+v4l = ["stitch/v4l"]
 
 [dependencies]
 anyhow = "1.0.93"
@@ -19,19 +20,21 @@ axum = { version = "0.7.7", default-features = false, features = [
 clap = { version = "4.5.20", default-features = false, features = [
     "derive",
     "std",
+    "help",
+    "usage",
 ] }
-futures.workspace = true
 futures-util = "0.3.31"
 image = { workspace = true, optional = true }
 kanal.workspace = true
-nokhwa.workspace = true
+# nokhwa.workspace = true
 tokio = { workspace = true }
 tower-http = { version = "0.6.1", features = ["fs", "trace"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+
 zerocopy = { version = "0.8.9", features = ["alloc"] }
 
 [dependencies.stitch]
 path = "../stitch"
 default-features = false
-features = ["toml-cfg", "live", "gpu"]
+features = ["toml-cfg", "live", "gpu", "obj-file"]
