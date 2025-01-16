@@ -1,17 +1,18 @@
-pub mod camera;
-
 pub mod buf;
-
+pub mod camera;
 pub mod loader;
-
 pub mod proj;
+pub(crate) mod util;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error)]
 pub enum Error {
-    #[error("io error while {1}: {0}")]
-    IO(std::io::Error, String),
+    #[error("io error: {0}")]
+    IO(#[from] std::io::Error),
+
+    #[error("io error {0} while {1}")]
+    IOWhen(std::io::Error, String),
 
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
@@ -32,21 +33,23 @@ pub enum Error {
     #[error("decode error: {0}")]
     DecodeError(#[from] toml::de::Error),
 
-    #[cfg(feature = "live")]
-    #[error("live err: {0}")]
-    LiveErr(#[from] nokhwa::NokhwaError),
-
+    // #[cfg(feature = "live")]
+    // #[error("live err: {0}")]
+    // LiveErr(#[from] nokhwa::NokhwaError),
     #[cfg(feature = "gpu")]
     #[error("gpu error: {0}")]
     GpuError(#[from] smpgpu::Error),
 
-    #[error("an option had the value of none, which shouldn't be possible")]
+    #[error("encountered a None value, which shouldn't have been possible")]
     UnexpectedNone,
+
+    #[error("{0}")]
+    Other(String),
 }
 
 impl Error {
-    pub fn io_ctx(msg: String) -> impl FnOnce(std::io::Error) -> Self {
-        move |err| Self::IO(err, msg)
+    pub fn io_ctx(msg: impl AsRef<str>) -> impl FnOnce(std::io::Error) -> Self {
+        move |err| Self::IOWhen(err, msg.as_ref().to_string())
     }
 }
 

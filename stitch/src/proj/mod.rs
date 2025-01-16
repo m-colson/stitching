@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::util::conv_deg_rad;
+
 #[cfg(feature = "gpu")]
 mod render_gpu;
 #[cfg(feature = "gpu")]
@@ -12,6 +14,7 @@ use crate::camera::live;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config<C> {
     pub style: ProjectionStyle,
+    pub view: ViewStyle,
     pub cameras: Vec<camera::Config<C>>,
 }
 
@@ -33,15 +36,32 @@ impl Config<live::Config> {
 #[serde(rename_all = "snake_case")]
 pub enum ProjectionStyle {
     RawCamera(u8),
-    Hemisphere { pos: [f32; 3], radius: f32 },
+    Flat,
 }
 
-impl ProjectionStyle {
-    #[must_use]
-    pub const fn radius(self) -> f32 {
-        match self {
-            Self::RawCamera(_) => 100.0,
-            Self::Hemisphere { radius, .. } => radius,
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewStyle {
+    Orthographic {
+        pos: [f32; 3],
+        radius: f32,
+    },
+    Perspective {
+        pos: [f32; 3],
+        #[serde(default)]
+        look_at: [f32; 3],
+        #[serde(with = "conv_deg_rad")]
+        fov_y: f32,
+    },
+    Orbit {
+        dist: f32,
+        z: f32,
+        #[serde(default)]
+        theta: f32,
+        #[serde(default)]
+        look_at: [f32; 3],
+        #[serde(with = "conv_deg_rad")]
+        fov_y: f32,
+        frame_per_rev: f32,
+    },
 }

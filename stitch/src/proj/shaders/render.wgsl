@@ -55,10 +55,12 @@ fn fs_proj(vert: VertexOutput) -> @location(0) vec4<f32> {
 
 fn back_proj(bound: vec3<f32>) -> u32 {
     var opts: array<vec2<f32>, 4>;
+    // First, precompute the optical space coords for the bound coord
     for (var n = 0u; n < pass_info.inp_sizes.z; n += 1u) {
         opts[n] = opt_from_world(inp_specs[n], bound);
     }
 
+    /// Next, loop through them and find the smallest optical angle
     var min_opt: f32 = 0.0;
     for (var iters = 0u; iters < pass_info.inp_sizes.z; iters += 1u) {
         var best_index = 0u;
@@ -71,10 +73,13 @@ fn back_proj(bound: vec3<f32>) -> u32 {
         }
 
         let p = opt_input_pixel(best_index, best);
+        // If we found a pixel with a non-zero alpha channel, return it
         if (p & 0xff000000u) != 0u {
             return p;
         }
 
+        // Otherwise, repeat the loop again but skip any pixel with an optical
+        // angle smaller than this one
         min_opt = best.x;
     }
 

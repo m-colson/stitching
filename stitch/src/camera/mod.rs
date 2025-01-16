@@ -2,6 +2,8 @@ use std::future::Future;
 
 use serde::{Deserialize, Serialize};
 
+use crate::util::conv_deg_rad;
+
 #[cfg(feature = "live")]
 pub mod live;
 
@@ -93,6 +95,11 @@ impl<T> Config<T> {
 
         Ok(Camera::new(self.view.with_dims(w as f32, h as f32), buf))
     }
+
+    pub fn load_with<B: OwnedWriteBuffer + 'static>(&self, buf: Loader<B>) -> Camera<Loader<B>> {
+        let (w, h, _) = buf.frame_size();
+        Camera::new(self.view.with_dims(w as f32, h as f32), buf)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -107,25 +114,6 @@ pub struct ViewParams {
     pub sensor: SensorParams,
     #[serde(default)]
     pub lens: LensKind,
-}
-
-mod conv_deg_rad {
-    use serde::{Deserialize, Deserializer, Serializer};
-
-    #[allow(clippy::trivially_copy_pass_by_ref)]
-    pub fn serialize<S>(v: &f32, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        s.serialize_f32(v.to_degrees())
-    }
-
-    pub fn deserialize<'de, D>(d: D) -> Result<f32, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        f32::deserialize(d).map(f32::to_radians)
-    }
 }
 
 impl ViewParams {

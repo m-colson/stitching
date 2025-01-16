@@ -1,8 +1,13 @@
-use std::{cell::Cell, num::NonZero, ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{num::NonZero, ops::DerefMut, path::PathBuf, sync::Arc};
 
 use encase::ShaderType;
 use glam::Mat4;
-use smpgpu::{Bindable, Bindings, Buffer, Context, MemMapper, RenderCheckpoint, Texture};
+use smpgpu::{
+    global as glob_gpu,
+    model::{Model, ModelBuilder, VertPosNorm},
+    AutoVisBindable, Buffer, Context, MemMapper, Pass, RenderCheckpoint, StorageBuffer, Texture,
+    Uniform, VertexBuffer,
+};
 use tokio::runtime::Handle;
 use zerocopy::FromZeros;
 
@@ -13,19 +18,20 @@ use crate::{
     Result,
 };
 
-use super::ProjectionStyle;
+use super::ViewStyle;
 
 pub struct GpuProjector {
-    ctx: Arc<Context>,
     out_texture: Texture,
     out_staging: Buffer,
-    pass_info: Buffer,
-    pass_info_data: Cell<PassInfo>,
-    view_mat: Buffer,
+    pass_info: Uniform<PassInfo>,
+    pass_info_inp_sizes: glam::UVec3,
+    view_mat: Uniform<Mat4>,
     inp_frames: Arc<Buffer>,
-    inp_specs: Buffer,
-    bound_mesh: Buffer,
+    inp_specs: StorageBuffer<InputSpec>,
+    bound_mesh: VertexBuffer<Vertex>,
     back_cp: RenderCheckpoint,
+    model: Option<Model<VertPosNorm, u16>>,
+    depth_texture: Texture,
 }
 
 #[derive(ShaderType, Clone, Copy, Debug, Default)]
@@ -67,8 +73,8 @@ struct PassInfo {
     bound_radius: f32,
 }
 
-#[derive(ShaderType)]
-struct Vertex {
+#[derive(ShaderType, Clone, Copy)]
+pub struct Vertex {
     pub pos: glam::Vec4,
 }
 
@@ -81,23 +87,22 @@ impl Vertex {
     }
 }
 
-#[derive(Clone)]
 pub struct GpuProjectorBuilder<'a> {
-    ctx: Arc<Context>,
     out_size: (usize, usize),
     input_size: (u32, u32, u32),
     bound_mesh: &'a [Vertex],
     mask_paths: Vec<Option<PathBuf>>,
+    model_builder: Option<smpgpu::model::ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>>,
 }
 
 impl<'a> GpuProjectorBuilder<'a> {
-    const fn new(ctx: Arc<Context>) -> Self {
+    const fn new() -> Self {
         Self {
-            ctx,
             out_size: (0, 0),
             input_size: (0, 0, 0),
             bound_mesh: &[],
             mask_paths: Vec::new(),
+            model_builder: None,
         }
     }
 
@@ -129,90 +134,103 @@ impl<'a> GpuProjectorBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> GpuProjector {
-        let ctx = self.ctx.as_ref();
+    pub fn model(
+        mut self,
+        f: impl FnOnce(
+            ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>,
+        ) -> ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>,
+    ) -> Self {
+        self.model_builder = Some(f(self
+            .model_builder
+            .take()
+            .unwrap_or_else(|| glob_gpu::model())));
+        self
+    }
 
-        let out_texture = Texture::builder(ctx)
+    pub fn build(self) -> GpuProjector {
+        let out_texture = glob_gpu::texture()
             .label("out_texture")
             .size(self.out_size.0, self.out_size.1)
             .render_target()
             .readable()
             .build();
-        let out_staging = out_texture.new_staging(ctx);
+        let out_staging = out_texture.new_staging_global();
 
-        let pass_info = Buffer::builder(ctx)
-            .label("pass_info")
-            .size_for::<PassInfo>()
-            .uniform()
-            .writable()
-            .build();
+        let pass_info = glob_gpu::uniform().label("pass_info").writable().build();
 
-        let view_mat = Buffer::builder(ctx)
-            .label("view")
-            .size_for::<glam::Mat4>()
-            .uniform()
-            .writable()
-            .build();
+        let view_mat = glob_gpu::uniform().label("view").writable().build();
 
-        let inp_frames = Buffer::builder(ctx)
+        let inp_frames = glob_gpu::buffer()
             .label("inp_frames")
-            .size(self.input_bytes())
+            .size((self.input_size.0 * self.input_size.1 * self.input_size.2 * 4) as _)
             .storage()
             .writable()
             .build();
 
-        let inp_specs = Buffer::builder(ctx)
+        let inp_specs = glob_gpu::storage_buffer()
             .label("inp_specs")
-            .size_for_many::<InputSpec>(self.input_size.2.into())
-            .storage()
+            .len(self.input_size.2.into())
             .writable()
             .build();
 
-        let inp_masks = Buffer::builder(ctx)
+        let inp_masks = glob_gpu::storage_buffer()
             .label("inp_masks")
-            .storage()
             .writable()
-            .build_with_data(&self.generate_masks());
+            .init_data(&self.generate_masks())
+            .build();
 
-        let bound_mesh = Buffer::builder(ctx)
+        let bound_mesh = glob_gpu::vertex_buffer()
             .label("bound_mesh")
-            .vertex()
-            .build_with_data(self.bound_mesh);
+            .init_data(self.bound_mesh)
+            .build();
 
-        let back_cp = RenderCheckpoint::builder(ctx)
+        let back_cp = glob_gpu::checkpoint()
             .group(
-                Bindings::new()
-                    .bind(pass_info.in_frag())
-                    .bind(view_mat.in_vertex())
-                    .bind(inp_frames.in_frag())
-                    .bind(inp_specs.in_frag())
-                    .bind(inp_masks.in_frag()),
+                pass_info.in_frag()
+                    & view_mat.in_vertex()
+                    & inp_frames.in_frag()
+                    & inp_specs.in_frag()
+                    & inp_masks.in_frag(),
             )
             .shader(smpgpu::include_shader!("shaders/render.wgsl" => "vs_proj" & "fs_proj"))
+            .enable_depth()
             .vert_buffer_of::<Vertex>(&smpgpu::vertex_attr_array![0 => Float32x4])
             .frag_target(out_texture.format())
-            .build()
-            .vertices(0..self.bound_mesh.len().try_into().unwrap());
+            .build();
+
+        let model = self.model_builder.map(|b| {
+            b.cp_build(|cp| {
+                cp.shader(smpgpu::include_shader!("shaders/model.wgsl"))
+                    .cull_backface()
+                    .enable_depth()
+                    .vert_buffer_of::<VertPosNorm>(
+                        &smpgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
+                    )
+                    .frag_target(out_texture.format())
+                    .build()
+            })
+        });
+
+        let depth_texture = glob_gpu::texture()
+            .label("depth_texture")
+            .size(self.out_size.0, self.out_size.1)
+            .render_target()
+            .depth()
+            .build();
 
         GpuProjector {
-            ctx: self.ctx,
             out_texture,
             out_staging,
             pass_info,
-            pass_info_data: Cell::new(PassInfo {
-                inp_sizes: self.input_size.into(),
-                bound_radius: f32::NAN,
-            }),
+            pass_info_inp_sizes: self.input_size.into(),
             view_mat,
             inp_frames: Arc::new(inp_frames),
             inp_specs,
             bound_mesh,
             back_cp,
+            model,
+            depth_texture,
         }
-    }
-
-    const fn input_bytes(&self) -> usize {
-        (self.input_size.0 * self.input_size.1 * self.input_size.2 * 4) as _
     }
 
     fn generate_masks(&self) -> Box<[u32]> {
@@ -246,96 +264,104 @@ impl<'a> GpuProjectorBuilder<'a> {
 }
 
 impl GpuProjector {
-    /// # Errors
-    /// see [`smpgpu::ctx::ContextAdapterBuilder::request_adapter`] and [`smpgpu::ctx::ContextDeviceBuilder::request_build`]
     #[inline]
-    pub async fn builder_auto() -> Result<GpuProjectorBuilder<'static>> {
-        Ok(GpuProjectorBuilder::new(
-            smpgpu::Context::builder()
-                .request_adapter()
-                .await?
-                .request_build()
-                .await?,
-        ))
+    pub fn builder() -> GpuProjectorBuilder<'static> {
+        GpuProjectorBuilder::new()
     }
 
     #[inline]
-    pub fn update_proj_view(&self, style: ProjectionStyle) {
-        match style {
-            ProjectionStyle::Hemisphere {
+    pub fn update_proj_view(&self, style: ViewStyle) {
+        self.pass_info.set_global(&PassInfo {
+            inp_sizes: self.pass_info_inp_sizes,
+            bound_radius: 0.0,
+        });
+
+        let out_size = self.out_texture.size();
+        #[allow(clippy::cast_precision_loss)]
+        let aspect = out_size.width as f32 / out_size.height as f32;
+
+        let view = match style {
+            ViewStyle::Orthographic {
                 pos: [x, y, _],
                 radius,
             } => {
-                let mut pass_info_data = self.pass_info_data.get();
-                pass_info_data.bound_radius = radius;
-                self.pass_info_data.set(pass_info_data);
-
-                self.ctx.write_uniform(&self.pass_info, &pass_info_data);
-                let out_size = self.out_texture.size();
-
-                let rh = radius;
-
-                #[allow(clippy::cast_precision_loss)]
-                let aspect = out_size.width as f32 / out_size.height as f32;
-
-                let view = Mat4::orthographic_rh(
-                    rh.mul_add(-aspect, x),
-                    rh.mul_add(aspect, x),
-                    -rh + y,
-                    rh + y,
+                Mat4::orthographic_rh(
+                    radius.mul_add(-aspect, x),
+                    radius.mul_add(aspect, x),
+                    -radius + y,
+                    radius + y,
                     0.1,
-                    200.,
+                    1000.,
                 ) * Mat4::look_at_rh(
                     glam::vec3(0., 0., 100.),
                     glam::vec3(0., 0., 0.),
                     glam::Vec3::Y,
-                );
-                self.ctx.write_uniform(&self.view_mat, &view);
+                )
             }
-            ProjectionStyle::RawCamera(..) => todo!(),
+            ViewStyle::Perspective {
+                pos,
+                look_at,
+                fov_y,
+            } => {
+                Mat4::perspective_rh(fov_y, aspect, 0.1, 1000.)
+                    * Mat4::look_at_rh(pos.into(), look_at.into(), glam::Vec3::Z)
+            }
+            ViewStyle::Orbit {
+                dist,
+                theta,
+                z,
+                look_at,
+                fov_y,
+                frame_per_rev: _,
+            } => {
+                Mat4::perspective_rh(fov_y, aspect, 0.1, 1000.)
+                    * Mat4::look_at_rh(
+                        [theta.sin() * dist, -theta.cos() * dist, z].into(),
+                        look_at.into(),
+                        glam::Vec3::Z,
+                    )
+            }
+        };
+
+        self.view_mat.set_global(&view);
+        if let Some(model) = &self.model {
+            model.set_view(view * Mat4::from_translation(glam::vec3(0., 0., 6.68)));
         }
     }
 
     #[inline]
     pub fn update_cam_specs<T>(&self, cams: &[Camera<T>]) {
-        self.ctx.write_storage(
-            &self.inp_specs,
+        self.inp_specs.set_global(
             &cams
                 .iter()
-                .map(|c| c.view.into())
-                .collect::<Vec<InputSpec>>(),
+                .map(|c: &Camera<T>| c.view.into())
+                .collect::<Vec<_>>(),
         );
     }
 
     #[inline]
     pub fn update_render(&self) {
-        let back_cmd = self
-            .back_cp
-            .encoder(&*self.ctx)
-            .vert_buf(&self.bound_mesh)
-            .attach(&self.out_texture.render_attach())
-            .then(self.out_texture.copy_to_buf_op(&self.out_staging))
-            .build();
+        glob_gpu::command()
+            .then(
+                Pass::render()
+                    | &self.depth_texture.depth_attach()
+                    | &self.out_texture.color_attach()
+                    | self.back_cp.to_item().vert_buf(&self.bound_mesh)
+                    | self.model.as_ref().map(Model::to_item),
+            )
+            .then(self.out_texture.copy_to(&self.out_staging))
+            .submit();
 
-        self.ctx.submit([back_cmd]);
-        self.ctx.signal_wake();
+        glob_gpu::force_wake();
     }
 
     #[inline]
-    pub fn block_copy_render_to<T: DerefMut<Target = [u8]> + FrameSize>(&self, buf: &mut T) {
-        let cpy_fut = MemMapper::new()
-            .with_cb(&self.out_staging, |data| {
-                buf.copy_from_slice(&data);
-            })
-            .run_all();
-
-        self.ctx.signal_wake();
-
+    pub fn block_copy_render_to<T: DerefMut<Target = [u8]>>(&self, buf: &mut T) {
+        let cpy_fut = MemMapper::new().copy(&self.out_staging, buf).run_all();
+        glob_gpu::force_wake();
         Handle::current().block_on(cpy_fut);
     }
 
-    /// # Errors
-    /// see [`LoadingBuffer::begin_load_with`]
     #[inline]
     pub fn take_input_buffers(
         &self,
@@ -355,7 +381,7 @@ impl GpuProjector {
     #[inline]
     fn inp_buffer_write(&self, offset: u64, size: u64) -> GpuDirectBufferWrite {
         GpuDirectBufferWrite {
-            ctx: self.ctx.clone(),
+            ctx: glob_gpu::get_global_context(),
             buf: self.inp_frames.clone(),
             offset,
             size: size.try_into().unwrap(),

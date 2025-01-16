@@ -12,7 +12,10 @@ pub trait OwnedWriteBuffer {
 }
 
 impl<T: std::ops::DerefMut<Target = [u8]>> OwnedWriteBuffer for T {
-    type View<'a> = &'a mut [u8] where Self: 'a;
+    type View<'a>
+        = &'a mut [u8]
+    where
+        Self: 'a;
 
     fn owned_to_view(&mut self) -> Self::View<'_> {
         self
@@ -37,10 +40,22 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
         let (req_send, req_recv) = kanal::bounded::<(B, kanal::OneshotSender<B>)>(4);
 
         tokio::task::spawn_blocking(move || {
-            while let Ok((mut req, resp_send)) = req_recv.recv() {
-                cb(req.owned_to_view().as_mut());
-                // if the receiver has been dropped, they don't want their buffer back!
-                _ = resp_send.send(req);
+            loop {
+                match req_recv.recv() {
+                    Ok((mut req, resp_send)) => {
+                        cb(req.owned_to_view().as_mut());
+                        // if the receiver has been dropped, they don't want their buffer back!
+                        _ = resp_send.send(req);
+                    }
+                    Err(kanal::ReceiveError::SendClosed) => {
+                        tracing::error!("loader exiting, all senders have dropped");
+                        break;
+                    }
+                    Err(kanal::ReceiveError::Closed) => {
+                        tracing::warn!("loader exiting, the sender was manually closed");
+                        break;
+                    }
+                }
             }
         });
 

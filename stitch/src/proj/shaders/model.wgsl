@@ -1,0 +1,29 @@
+@group(0)
+@binding(0)
+var<uniform> view: mat4x4<f32>;
+
+struct VertexOutput {
+    @builtin(position) proj_pos: vec4<f32>,
+    @location(1) normal: vec4<f32>,
+    @location(2) world_pos: vec4<f32>,
+}
+
+@vertex
+fn vs_proj(@location(0) v_pos: vec4<f32>, @location(1) v_norm: vec4<f32>) -> VertexOutput {
+    var out: VertexOutput;
+    out.proj_pos = view * v_pos;
+    out.normal = v_norm;
+    out.world_pos = v_pos;
+    return out;
+}
+
+const COLOR = vec3(0.0, 0.3, 0.7);
+
+@fragment
+fn fs_proj(vert: VertexOutput) -> @location(0) vec4<f32> {
+    let light_dir = normalize(vec3(1, -0.5, 1));
+
+    let corr = max(dot(light_dir, vert.normal.xyz), 0.1);
+
+    return vec4(corr * COLOR, 1.0);
+}

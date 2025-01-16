@@ -66,7 +66,7 @@ impl<'a> FrameBufferView<'a> {
     }
 }
 
-impl<'a> FrameSize for FrameBufferView<'a> {
+impl FrameSize for FrameBufferView<'_> {
     fn width(&self) -> usize {
         self.width
     }
@@ -80,7 +80,7 @@ impl<'a> FrameSize for FrameBufferView<'a> {
     }
 }
 
-impl<'a> Deref for FrameBufferView<'a> {
+impl Deref for FrameBufferView<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
