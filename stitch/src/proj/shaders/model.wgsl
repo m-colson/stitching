@@ -1,6 +1,10 @@
 @group(0)
 @binding(0)
-var<uniform> view: mat4x4<f32>;
+var<uniform> mview: mat4x4<f32>;
+
+@group(0)
+@binding(1)
+var<uniform> cview: mat4x4<f32>;
 
 struct VertexOutput {
     @builtin(position) proj_pos: vec4<f32>,
@@ -11,7 +15,7 @@ struct VertexOutput {
 @vertex
 fn vs_proj(@location(0) v_pos: vec4<f32>, @location(1) v_norm: vec4<f32>) -> VertexOutput {
     var out: VertexOutput;
-    out.proj_pos = view * v_pos;
+    out.proj_pos = cview * mview * v_pos;
     out.normal = v_norm;
     out.world_pos = v_pos;
     return out;

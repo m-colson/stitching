@@ -47,12 +47,15 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
                         // if the receiver has been dropped, they don't want their buffer back!
                         _ = resp_send.send(req);
                     }
-                    Err(kanal::ReceiveError::SendClosed) => {
-                        tracing::error!("loader exiting, all senders have dropped");
-                        break;
-                    }
-                    Err(kanal::ReceiveError::Closed) => {
-                        tracing::warn!("loader exiting, the sender was manually closed");
+                    Err(err) => {
+                        match err {
+                            kanal::ReceiveError::SendClosed => {
+                                tracing::warn!("loader exiting because all senders have dropped")
+                            }
+                            kanal::ReceiveError::Closed => {
+                                tracing::warn!("loader exiting bacause it was closed")
+                            }
+                        }
                         break;
                     }
                 }
@@ -93,6 +96,13 @@ pub async fn collect_empty_camera_tickets<
         })
     }))
     .await
+}
+
+#[inline]
+pub async fn discard_tickets<B: OwnedWriteBuffer + Send>(tickets: Vec<Ticket<B>>) {
+    for ticket in tickets {
+        _ = ticket.take().await;
+    }
 }
 
 #[inline]

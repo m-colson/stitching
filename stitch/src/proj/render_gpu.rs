@@ -1,4 +1,4 @@
-use std::{num::NonZero, ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{f32::consts::PI, num::NonZero, ops::DerefMut, path::PathBuf, sync::Arc};
 
 use encase::ShaderType;
 use glam::Mat4;
@@ -6,9 +6,8 @@ use smpgpu::{
     global as glob_gpu,
     model::{Model, ModelBuilder, VertPosNorm},
     AutoVisBindable, Buffer, Context, MemMapper, Pass, RenderCheckpoint, StorageBuffer, Texture,
-    Uniform, VertexBuffer,
+    Uniform,
 };
-use tokio::runtime::Handle;
 use zerocopy::FromZeros;
 
 use crate::{
@@ -21,17 +20,19 @@ use crate::{
 use super::ViewStyle;
 
 pub struct GpuProjector {
-    out_texture: Texture,
-    out_staging: Buffer,
     pass_info: Uniform<PassInfo>,
     pass_info_inp_sizes: glam::UVec3,
-    view_mat: Uniform<Mat4>,
+
     inp_frames: Arc<Buffer>,
     inp_specs: StorageBuffer<InputSpec>,
-    bound_mesh: VertexBuffer<Vertex>,
-    back_cp: RenderCheckpoint,
-    model: Option<Model<VertPosNorm, u16>>,
+
+    main_out: RenderOutput,
     depth_texture: Texture,
+    back: Model<Vertex, u16>,
+    object_model: Option<Model<VertPosNorm, u16>>,
+
+    sub_outs: Vec<(RenderOutput, RenderCheckpoint)>,
+    last_sub_views: Vec<Mat4>,
 }
 
 #[derive(ShaderType, Clone, Copy, Debug, Default)]
@@ -67,6 +68,31 @@ impl From<ViewParams> for InputSpec {
     }
 }
 
+struct RenderOutput {
+    pub cam: Uniform<Mat4>,
+    pub texture: Texture,
+    pub staging: Buffer,
+}
+
+impl RenderOutput {
+    pub fn new(width: usize, height: usize) -> Self {
+        let cam = glob_gpu::uniform().writable().build();
+        let texture = glob_gpu::texture()
+            .label("out_texture")
+            .size(width, height)
+            .render_target()
+            .readable()
+            .build();
+        let staging = texture.new_staging_global();
+
+        Self {
+            cam,
+            texture,
+            staging,
+        }
+    }
+}
+
 #[derive(ShaderType, Clone, Copy, Debug)]
 struct PassInfo {
     inp_sizes: glam::UVec3,
@@ -90,7 +116,9 @@ impl Vertex {
 pub struct GpuProjectorBuilder<'a> {
     out_size: (usize, usize),
     input_size: (u32, u32, u32),
-    bound_mesh: &'a [Vertex],
+    num_subs: usize,
+    bound_verts: Vec<Vertex>,
+    bound_idxs: Vec<u16>,
     mask_paths: Vec<Option<PathBuf>>,
     model_builder: Option<smpgpu::model::ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>>,
 }
@@ -100,7 +128,9 @@ impl<'a> GpuProjectorBuilder<'a> {
         Self {
             out_size: (0, 0),
             input_size: (0, 0, 0),
-            bound_mesh: &[],
+            num_subs: 0,
+            bound_verts: Vec::new(),
+            bound_idxs: Vec::new(),
             mask_paths: Vec::new(),
             model_builder: None,
         }
@@ -116,16 +146,40 @@ impl<'a> GpuProjectorBuilder<'a> {
         self
     }
 
-    pub fn flat_bound(mut self) -> Self {
-        static MESH_DATA: [Vertex; 6] = [
-            Vertex::new(-500., -500., 0.),
-            Vertex::new(500., -500., 0.),
-            Vertex::new(500., 500., 0.),
-            Vertex::new(500., 500., 0.),
-            Vertex::new(-500., 500., 0.),
-            Vertex::new(-500., -500., 0.),
-        ];
-        self.bound_mesh = &MESH_DATA;
+    pub const fn num_subs(mut self, n: usize) -> Self {
+        self.num_subs = n;
+        self
+    }
+
+    pub fn cylinder_bound(mut self) -> Self {
+        const SLICES: u16 = 20;
+        const RADIUS: f32 = 70.;
+        const HEIGHT: f32 = 50.;
+
+        let mut verts = Vec::new();
+        verts.push(Vertex::new(0., 0., 0.));
+
+        for n in 0..SLICES {
+            let (x, y) = (2. * PI * n as f32 / SLICES as f32).sin_cos();
+            let (x, y) = (x * RADIUS, y * RADIUS);
+            verts.extend([Vertex::new(x, y, 0.), Vertex::new(x, y, HEIGHT)])
+        }
+
+        let mut idxs = Vec::new();
+        for n in 0..(SLICES - 1) {
+            let bn = n * 2 + 1;
+            idxs.extend([0, bn, bn + 2]);
+            idxs.extend([bn + 2, bn, bn + 1]);
+            idxs.extend([bn + 1, bn + 3, bn + 2]);
+        }
+
+        let last_bn = SLICES * 2 - 1;
+        idxs.extend([0, last_bn, 1]);
+        idxs.extend([1, last_bn, last_bn + 1]);
+        idxs.extend([last_bn + 1, 2, 1]);
+
+        self.bound_verts = verts;
+        self.bound_idxs = idxs;
         self
     }
 
@@ -148,17 +202,7 @@ impl<'a> GpuProjectorBuilder<'a> {
     }
 
     pub fn build(self) -> GpuProjector {
-        let out_texture = glob_gpu::texture()
-            .label("out_texture")
-            .size(self.out_size.0, self.out_size.1)
-            .render_target()
-            .readable()
-            .build();
-        let out_staging = out_texture.new_staging_global();
-
         let pass_info = glob_gpu::uniform().label("pass_info").writable().build();
-
-        let view_mat = glob_gpu::uniform().label("view").writable().build();
 
         let inp_frames = glob_gpu::buffer()
             .label("inp_frames")
@@ -179,36 +223,58 @@ impl<'a> GpuProjectorBuilder<'a> {
             .init_data(&self.generate_masks())
             .build();
 
-        let bound_mesh = glob_gpu::vertex_buffer()
-            .label("bound_mesh")
-            .init_data(self.bound_mesh)
-            .build();
+        let main_out = RenderOutput::new(self.out_size.0, self.out_size.1);
 
-        let back_cp = glob_gpu::checkpoint()
-            .group(
-                pass_info.in_frag()
-                    & view_mat.in_vertex()
-                    & inp_frames.in_frag()
-                    & inp_specs.in_frag()
-                    & inp_masks.in_frag(),
-            )
-            .shader(smpgpu::include_shader!("shaders/render.wgsl" => "vs_proj" & "fs_proj"))
-            .enable_depth()
-            .vert_buffer_of::<Vertex>(&smpgpu::vertex_attr_array![0 => Float32x4])
-            .frag_target(out_texture.format())
-            .build();
+        let render_shader = smpgpu::include_shader!("shaders/render.wgsl" => "vs_proj" & "fs_proj");
 
-        let model = self.model_builder.map(|b| {
-            b.cp_build(|cp| {
+        let back = glob_gpu::model()
+            .verts(&self.bound_verts)
+            .indices(&self.bound_idxs)
+            .cp_build_cam(&main_out.cam, |cp| {
+                cp.group(
+                    pass_info.in_frag()
+                        & inp_frames.in_frag()
+                        & inp_specs.in_frag()
+                        & inp_masks.in_frag(),
+                )
+                .shader(render_shader.clone())
+                .enable_depth()
+                .vert_buffer_of::<Vertex>(&smpgpu::vertex_attr_array![0 => Float32x4])
+                .frag_target(main_out.texture.format())
+                .build()
+            });
+
+        let sub_outs = (0..self.num_subs)
+            .map(|_| {
+                let out = RenderOutput::new(640, 640);
+                let cp = glob_gpu::checkpoint()
+                    .group(back.view.in_vertex() & out.cam.in_vertex())
+                    .group(
+                        pass_info.in_frag()
+                            & inp_frames.in_frag()
+                            & inp_specs.in_frag()
+                            & inp_masks.in_frag(),
+                    )
+                    .shader(render_shader.clone())
+                    .vert_buffer_of::<Vertex>(&smpgpu::vertex_attr_array![0 => Float32x4])
+                    .frag_target(out.texture.format())
+                    .build();
+                (out, cp)
+            })
+            .collect();
+
+        let object_model = self.model_builder.map(|b| {
+            b.cp_build_cam(&main_out.cam, |cp| {
                 cp.shader(smpgpu::include_shader!("shaders/model.wgsl"))
                     .cull_backface()
                     .enable_depth()
                     .vert_buffer_of::<VertPosNorm>(
                         &smpgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4],
                     )
-                    .frag_target(out_texture.format())
+                    .frag_target(main_out.texture.format())
                     .build()
             })
+            .with_view(Mat4::from_translation(glam::vec3(0., 0., 6.68)))
         });
 
         let depth_texture = glob_gpu::texture()
@@ -219,17 +285,16 @@ impl<'a> GpuProjectorBuilder<'a> {
             .build();
 
         GpuProjector {
-            out_texture,
-            out_staging,
             pass_info,
             pass_info_inp_sizes: self.input_size.into(),
-            view_mat,
             inp_frames: Arc::new(inp_frames),
             inp_specs,
-            bound_mesh,
-            back_cp,
-            model,
+            main_out,
             depth_texture,
+            back,
+            object_model,
+            sub_outs,
+            last_sub_views: Vec::new(),
         }
     }
 
@@ -276,7 +341,7 @@ impl GpuProjector {
             bound_radius: 0.0,
         });
 
-        let out_size = self.out_texture.size();
+        let out_size = self.main_out.texture.size();
         #[allow(clippy::cast_precision_loss)]
         let aspect = out_size.width as f32 / out_size.height as f32;
 
@@ -323,10 +388,31 @@ impl GpuProjector {
             }
         };
 
-        self.view_mat.set_global(&view);
-        if let Some(model) = &self.model {
-            model.set_view(view * Mat4::from_translation(glam::vec3(0., 0., 6.68)));
+        self.main_out.cam.set_global(&view);
+    }
+
+    pub fn update_sub_views(&mut self) {
+        let proj = Mat4::perspective_rh(80f32.to_radians(), 1., 0.1, 1000.);
+        let rm = 2. * PI / self.sub_outs.len() as f32;
+
+        const HEIGHT: f32 = 10.;
+
+        let mut out = Vec::new();
+        for (i, (o, _)) in self.sub_outs.iter().enumerate() {
+            let rot = rm * (i as f32);
+
+            let view = proj
+                * Mat4::look_at_rh(
+                    [0., 0., HEIGHT].into(),
+                    [rot.sin(), rot.cos(), HEIGHT].into(),
+                    glam::Vec3::Z,
+                );
+
+            o.cam.set_global(&view);
+
+            out.push(view.inverse());
         }
+        self.last_sub_views = out;
     }
 
     #[inline]
@@ -345,21 +431,58 @@ impl GpuProjector {
             .then(
                 Pass::render()
                     | &self.depth_texture.depth_attach()
-                    | &self.out_texture.color_attach()
-                    | self.back_cp.to_item().vert_buf(&self.bound_mesh)
-                    | self.model.as_ref().map(Model::to_item),
+                    | &self.main_out.texture.color_attach()
+                    | self.back.to_item()
+                    | self.object_model.as_ref().map(Model::to_item),
             )
-            .then(self.out_texture.copy_to(&self.out_staging))
+            .then(self.main_out.texture.copy_to(&self.main_out.staging))
             .submit();
+
+        glob_gpu::force_wake();
+
+        for (o, cp) in &self.sub_outs {
+            glob_gpu::command()
+                .then(
+                    Pass::render()
+                        | &o.texture.color_attach()
+                        | cp.to_item()
+                            .vert_buf(&self.back.verts)
+                            .index_buf(&self.back.idx, 0..self.back.idx_len),
+                )
+                .then(o.texture.copy_to(&o.staging))
+                .submit();
+        }
 
         glob_gpu::force_wake();
     }
 
     #[inline]
-    pub fn block_copy_render_to<T: DerefMut<Target = [u8]>>(&self, buf: &mut T) {
-        let cpy_fut = MemMapper::new().copy(&self.out_staging, buf).run_all();
+    pub async fn copy_render_to<T: DerefMut<Target = [u8]>>(&self, buf: &mut T) {
+        let cpy_fut = MemMapper::new().copy(&self.main_out.staging, buf).run_all();
         glob_gpu::force_wake();
-        Handle::current().block_on(cpy_fut);
+        cpy_fut.await;
+    }
+
+    #[inline]
+    pub async fn wait_for_subs(&self, f: impl FnOnce(usize, &[u8]) + Send + Clone) {
+        let cpy_fut = self
+            .sub_outs
+            .iter()
+            .enumerate()
+            .fold(MemMapper::new(), |mapper, (i, (o, _))| {
+                let f = f.clone();
+                mapper.read_from(&o.staging, move |buf| {
+                    // let img =
+                    //     image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(640, 640, buf).unwrap();
+                    tracing::info!("saving view{i}");
+                    f(i, &buf)
+                    // img.save(format!("view{i}.png")).unwrap();
+                })
+            })
+            .run_all();
+
+        glob_gpu::force_wake();
+        cpy_fut.await;
     }
 
     #[inline]
@@ -397,7 +520,8 @@ pub struct GpuDirectBufferWrite {
 }
 
 impl OwnedWriteBuffer for GpuDirectBufferWrite {
-    type View<'a> = smpgpu::DirectWritableBufferView<'a>
+    type View<'a>
+        = smpgpu::DirectWritableBufferView<'a>
     where
         Self: 'a;
 

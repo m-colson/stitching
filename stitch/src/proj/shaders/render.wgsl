@@ -2,6 +2,14 @@ const PI: f32 = 3.141592653589793;
 
 @group(0)
 @binding(0)
+var<uniform> mview: mat4x4<f32>;
+
+@group(0)
+@binding(1)
+var<uniform> cview: mat4x4<f32>;
+
+@group(1)
+@binding(0)
 var<uniform> pass_info: PassInfo;
 
 struct PassInfo {
@@ -9,20 +17,18 @@ struct PassInfo {
     bound_radius: f32,
 }
 
-@group(0)
-@binding(1)
-var<uniform> view: mat4x4<f32>;
 
-@group(0)
-@binding(2)
+
+@group(1)
+@binding(1)
 var<storage, read> inp_frames: array<u32>;
 
-@group(0)
-@binding(3)
+@group(1)
+@binding(2)
 var<storage, read> inp_specs: array<InputSpec>;
 
-@group(0)
-@binding(4)
+@group(1)
+@binding(3)
 var<storage, read> inp_masks: array<u32>;
 
 struct InputSpec {
@@ -41,7 +47,7 @@ struct VertexOutput {
 @vertex
 fn vs_proj(@location(0) v_pos: vec4<f32>) -> VertexOutput {
     var out: VertexOutput;
-    out.proj_pos = view * v_pos;
+    out.proj_pos = cview * mview * v_pos;
     out.world_pos = v_pos;
     return out;
 }
