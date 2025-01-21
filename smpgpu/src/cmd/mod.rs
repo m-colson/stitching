@@ -6,7 +6,7 @@ pub(crate) mod compute;
 pub use compute::{ComputeCheckpoint, ComputeItem, ComputePass};
 
 pub(crate) mod render;
-pub use render::{RenderCheckpoint, RenderItem, RenderPass};
+pub use render::{ColorAttachment, DepthAttachment, RenderCheckpoint, RenderItem, RenderPass};
 
 /// Contains the information necessary to build a specific command without
 /// the need for lifetimes.

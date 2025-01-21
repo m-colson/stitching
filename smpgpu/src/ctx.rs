@@ -74,7 +74,7 @@ pub struct ContextAdapterBuilder<'a, 'b> {
     opts: wgpu::RequestAdapterOptions<'a, 'b>,
 }
 
-impl<'a, 'b> ContextAdapterBuilder<'a, 'b> {
+impl ContextAdapterBuilder<'_, '_> {
     pub fn surface<'ap, 'bp>(
         self,
         s: impl Into<Option<&'ap wgpu::Surface<'bp>>>,

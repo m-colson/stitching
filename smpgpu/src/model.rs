@@ -40,6 +40,11 @@ impl<V: ShaderSize, I: IndexBufferFormat> Model<V, I> {
         self.view.set_global(&m);
     }
 
+    pub fn with_view(self, m: glam::Mat4) -> Self {
+        self.view.set_global(&m);
+        self
+    }
+
     pub fn to_item(&self) -> RenderItem {
         self.cp
             .to_item()
@@ -63,7 +68,7 @@ impl<'a, V: ShaderSize + Clone, I: IndexBufferFormat> ModelBuilder<'a, V, I> {
         }
     }
 
-    pub fn model_verts(mut self, verts: &'a [V]) -> Self {
+    pub fn verts(mut self, verts: &'a [V]) -> Self {
         self.verts = Cow::Borrowed(verts);
         self
     }
@@ -73,11 +78,15 @@ impl<'a, V: ShaderSize + Clone, I: IndexBufferFormat> ModelBuilder<'a, V, I> {
         self
     }
 
-    pub fn cp_build(
+    pub fn cp_build_cam(
         self,
+        cam: &Uniform<glam::Mat4>,
         f: impl FnOnce(CheckpointBuilder<'a>) -> RenderCheckpoint,
     ) -> Model<V, I> {
-        let view = UniformBuilder::new(self.dev).writable().build();
+        let view = UniformBuilder::new(self.dev)
+            .writable()
+            .init_data(&glam::Mat4::IDENTITY)
+            .build();
 
         let verts = VertexBufferBuilder::new(self.dev)
             .init_data(&self.verts)
@@ -87,7 +96,7 @@ impl<'a, V: ShaderSize + Clone, I: IndexBufferFormat> ModelBuilder<'a, V, I> {
             .init_data(&self.idxs)
             .build();
 
-        let cp = f(CheckpointBuilder::new(self.dev).group(view.in_vertex()));
+        let cp = f(CheckpointBuilder::new(self.dev).group(view.in_vertex() & cam.in_vertex()));
 
         Model {
             view,

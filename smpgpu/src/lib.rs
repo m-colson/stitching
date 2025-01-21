@@ -3,34 +3,28 @@
 pub use wgpu::vertex_attr_array;
 
 mod bind;
-pub use bind::{AsBinding, AutoVisBindable, Bindings, VisBindable};
-
 mod buffer;
-pub use buffer::{Buffer, BufferBuilder};
-
 mod cmd;
-pub use cmd::{Checkpoint, ComputeCheckpoint, ComputeItem, Pass, RenderCheckpoint, RenderItem};
-
 mod ctx;
-pub use ctx::Context;
-
-pub mod global;
-
 mod mem;
-pub use mem::MemMapper;
-
-pub mod model;
-
 mod sampler;
-pub use sampler::Sampler;
-
 mod shader;
-pub use shader::{RenderShader, Shader};
-
 mod texture;
-pub use texture::Texture;
-
 mod typed_buffer;
+
+pub use bind::{AsBinding, AutoVisBindable, Bindings, VisBindable};
+pub use buffer::{Buffer, BufferBuilder};
+pub use cmd::{
+    Checkpoint, ColorAttachment, ComputeCheckpoint, ComputeItem, DepthAttachment, Pass,
+    RenderCheckpoint, RenderItem,
+};
+pub use ctx::Context;
+pub mod global;
+pub use mem::MemMapper;
+pub mod model;
+pub use sampler::Sampler;
+pub use shader::{RenderShader, Shader};
+pub use texture::Texture;
 pub use typed_buffer::{IndexBuffer, StorageBuffer, Uniform, VertexBuffer};
 
 /// The error type for operations in this crate

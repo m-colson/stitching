@@ -15,7 +15,7 @@ impl<'a> MemMapper<'a> {
     pub fn read_from(
         mut self,
         buf: &'a wgpu::Buffer,
-        cb: impl FnOnce(wgpu::BufferView<'a>) + 'a,
+        cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
     ) -> Self {
         self.chans.push(MappingCallback::new_read(buf, cb));
         self
@@ -26,7 +26,7 @@ impl<'a> MemMapper<'a> {
     pub fn write_to(
         mut self,
         buf: &'a wgpu::Buffer,
-        cb: impl FnOnce(wgpu::BufferView<'a>) + 'a,
+        cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
     ) -> Self {
         self.chans.push(MappingCallback::new_write(buf, cb));
         self
@@ -54,19 +54,25 @@ impl<'a> MemMapper<'a> {
 struct MappingCallback<'a>(
     &'a wgpu::Buffer,
     wgpu::BufferSlice<'a>,
-    Option<Box<dyn FnOnce(wgpu::BufferView<'a>) + 'a>>,
+    Option<Box<dyn FnOnce(wgpu::BufferView<'a>) + Send + 'a>>,
     kanal::Receiver<Result<(), wgpu::BufferAsyncError>>,
 );
 
 impl<'a> MappingCallback<'a> {
-    pub fn new_read(b: &'a wgpu::Buffer, cb: impl FnOnce(wgpu::BufferView<'a>) + 'a) -> Self {
+    pub fn new_read(
+        b: &'a wgpu::Buffer,
+        cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
+    ) -> Self {
         let (res_send, res_recv) = kanal::bounded(1);
         let bs = b.slice(..);
         bs.map_async(wgpu::MapMode::Read, move |v| res_send.send(v).unwrap());
         Self(b, bs, Some(Box::new(cb)), res_recv)
     }
 
-    pub fn new_write(b: &'a wgpu::Buffer, cb: impl FnOnce(wgpu::BufferView<'a>) + 'a) -> Self {
+    pub fn new_write(
+        b: &'a wgpu::Buffer,
+        cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
+    ) -> Self {
         let (res_send, res_recv) = kanal::bounded(1);
         let bs = b.slice(..);
         bs.map_async(wgpu::MapMode::Write, move |v| res_send.send(v).unwrap());
@@ -74,7 +80,7 @@ impl<'a> MappingCallback<'a> {
     }
 }
 
-impl<'a> MappingCallback<'a> {
+impl MappingCallback<'_> {
     async fn wait_async(mut self) {
         self.3.clone().to_async().recv().await.unwrap().unwrap();
         let data = self.1.get_mapped_range();
