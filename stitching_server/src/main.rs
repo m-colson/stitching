@@ -6,9 +6,9 @@ use clap::{Parser, Subcommand};
 use util::Metrics;
 
 mod app;
-mod util;
-
+mod infer_host;
 mod log;
+mod util;
 
 #[tokio::main]
 pub async fn main() {

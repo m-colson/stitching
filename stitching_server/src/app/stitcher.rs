@@ -8,6 +8,7 @@ use stitch::{
     proj::{self, GpuDirectBufferWrite, GpuProjector, ProjectionStyle, ViewStyle},
     Result,
 };
+use tokio::runtime::Handle;
 
 use crate::util::IntervalTimer;
 
@@ -24,19 +25,22 @@ pub struct Sticher {
 
 impl Sticher {
     pub fn from_cfg_gpu(cfg: proj::Config<live::Config>, proj_w: usize, proj_h: usize) -> Self {
+        let subs = 4;
+
         let cam_res = cfg.cameras[0]
             .meta
             .resolution
             .expect("missing resolution for camera 0");
 
-        let proj = GpuProjector::builder()
+        let mut proj = GpuProjector::builder()
+            .num_subs(subs)
             .input_size(
                 cam_res[0],
                 cam_res[1],
                 cfg.cameras.len().try_into().unwrap(),
             )
             .out_size(proj_w, proj_h)
-            .flat_bound()
+            .cylinder_bound()
             .masks_from_cfgs(&cfg.cameras)
             .model(|m| m.obj_file_reader(Cursor::new(include_str!("../../assets/whole_plane.obj"))))
             .build();
@@ -44,13 +48,31 @@ impl Sticher {
         let (msg_send, msg_recv) = kanal::bounded(0);
         let (update_send, update_recv) = kanal::bounded(4);
 
-        tokio::task::spawn_blocking(move || {
-            let res = SticherInner::from_cfg(&cfg, (proj_w, proj_h), msg_send, update_recv)
-                .and_then(|inner| SticherInner::block(inner, &proj));
+        let inferer = crate::infer_host::InferHost::spawn(4).unwrap();
 
-            match res {
-                Ok(()) => tracing::warn!("stitcher exiting normally"),
-                Err(err) => tracing::error!("stitcher exiting because {err}"),
+        tokio::task::spawn(async move {
+            let res = SticherInner::from_cfg(&cfg, (proj_w, proj_h), msg_send, update_recv);
+            let Ok(inner) =
+                res.inspect_err(|err| tracing::error!("stitcher exiting because {err}"))
+            else {
+                return;
+            };
+
+            let res = SticherInner::run(inner, &mut proj, move |n, img| {
+                tokio::task::block_in_place(|| {
+                    Handle::current().block_on(inferer.run_input(n, img, |bbs| {
+                        for b in bbs {
+                            tracing::info!("bound {b}");
+                        }
+                    }));
+                });
+            })
+            .await;
+
+            if let Err(err) = res {
+                tracing::error!("stitcher exiting because {err}");
+            } else {
+                tracing::warn!("stitcher exiting normally");
             }
         });
 
@@ -102,9 +124,8 @@ impl<B: OwnedWriteBuffer + 'static> SticherInner<B> {
                     tracing::error!("{err}");
 
                     let out = cfg.meta.resolution.map(|res| {
-                        let index = cfg.meta.live_index;
-                        cfg.load_with(Loader::new_blocking(res[0], res[1], 4, move |_| {
-                            tracing::warn!("ignoring request for camera {index}");
+                        cfg.load_with(Loader::new_blocking(res[0], res[1], 4, move |b| {
+                            b.fill(255);
                         }))
                     });
 
@@ -134,9 +155,13 @@ impl<B: OwnedWriteBuffer + 'static> SticherInner<B> {
 }
 
 impl SticherInner<GpuDirectBufferWrite> {
-    pub fn block(mut self, proj: &GpuProjector) -> stitch::Result<()> {
+    pub async fn run(
+        mut self,
+        proj: &mut GpuProjector,
+        sub_handler: impl FnOnce(usize, &[u8]) + Send + Clone,
+    ) -> stitch::Result<()> {
         // first frame load takes much longer, do it before we starting profiling.
-        loader::block_discard_tickets(proj.take_input_buffers(&self.cams)?);
+        loader::discard_tickets(proj.take_input_buffers(&self.cams)?).await;
 
         let mut timer = IntervalTimer::new();
         while self.avail_updates() {
@@ -154,15 +179,16 @@ impl SticherInner<GpuDirectBufferWrite> {
 
             proj.update_cam_specs(&self.cams);
             proj.update_proj_view(self.view_style);
+            proj.update_sub_views();
 
             timer.mark("setup");
 
-            loader::block_discard_tickets(buf_tickets);
+            loader::discard_tickets(buf_tickets).await;
 
             timer.mark("frame load");
 
             proj.update_render();
-            proj.block_copy_render_to(&mut self.proj_buf);
+            proj.copy_render_to(&mut self.proj_buf).await;
 
             timer.mark("backward");
 
@@ -175,6 +201,10 @@ impl SticherInner<GpuDirectBufferWrite> {
             }
 
             timer.mark("handoff");
+
+            proj.wait_for_subs(sub_handler.clone()).await;
+
+            timer.mark("subexec");
             timer.log_iters_per_sec("render");
         }
 

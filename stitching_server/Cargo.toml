@@ -17,6 +17,7 @@ axum = { version = "0.7.7", default-features = false, features = [
     "tracing",
     "ws",
 ] }
+bytemuck = "1.21.0"
 clap = { version = "4.5.20", default-features = false, features = [
     "derive",
     "std",
@@ -24,13 +25,17 @@ clap = { version = "4.5.20", default-features = false, features = [
     "usage",
 ] }
 futures-util = "0.3.31"
+half = "2.4.1"
 image = { workspace = true, optional = true }
 kanal.workspace = true
+tensorrt = { version = "0.1.0", path = "../tensorrt", features = ["tracing"] }
+thiserror = "2.0.11"
 # nokhwa.workspace = true
 tokio = { workspace = true }
 tower-http = { version = "0.6.1", features = ["fs", "trace"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+trt-yolo = { version = "0.1.0", path = "../trt-yolo" }
 
 zerocopy = { version = "0.8.9", features = ["alloc"] }
 
