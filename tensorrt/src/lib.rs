@@ -17,7 +17,10 @@ pub fn onnx_file_to_plan(filename: &str) -> SerializedNetwork {
         builder.create_network_v2(1 << tensorrt_sys::NetworkDefinitionCreationFlag_kSTRONGLY_TYPED);
 
     let mut parser = onnx::Parser::new(&mut network, DEFAULT_LOGGER);
-    parser.parse_from_file(&CString::new(filename).unwrap(), Severity::kWARNING);
+    parser.parse_from_file(
+        &CString::new(filename).expect("illegal filename"),
+        Severity::kWARNING,
+    );
 
     let errs = parser.get_errors();
     if !errs.is_empty() {

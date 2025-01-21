@@ -37,7 +37,10 @@ impl Sticher {
             .input_size(
                 cam_res[0],
                 cam_res[1],
-                cfg.cameras.len().try_into().unwrap(),
+                cfg.cameras
+                    .len()
+                    .try_into()
+                    .expect("number of cameras is greater than a u32 can store"),
             )
             .out_size(proj_w, proj_h)
             .cylinder_bound()

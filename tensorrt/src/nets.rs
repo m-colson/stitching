@@ -130,7 +130,7 @@ impl NetworkDefinition {
         };
 
         let null_str = unsafe { CStr::from_ptr(raw) };
-        null_str.to_str().unwrap()
+        null_str.to_str().expect("illegal name")
     }
 
     pub fn get_flag(&self, flag: tensorrt_sys::NetworkDefinitionCreationFlag) -> bool {

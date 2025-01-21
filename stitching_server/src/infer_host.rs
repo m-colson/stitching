@@ -54,9 +54,13 @@ impl InferHost {
 
                         ctx.set_input_tensor(c"images", &in_buf);
                         ctx.enqueue(&host_stream);
-                        out_mem
+                        if let Err(err) = out_mem
                             .copy_to_async(bytemuck::cast_slice_mut(&mut out_buf), &host_stream)
-                            .unwrap();
+                        {
+                            tracing::error!("while loading bound buffer: {}", err);
+                            continue;
+                        }
+
                         host_stream.synchronize().unwrap();
 
                         f(trt_yolo::nms_cpu(&out_buf, which.out_shape(), 0.65, 0.5))

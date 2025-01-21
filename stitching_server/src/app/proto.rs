@@ -80,10 +80,10 @@ impl<O: zerocopy::ByteOrder> VideoPacket<O> {
         inner[0] = PacketKind::UpdateFrame as _;
         zerocopy::U16::<O>::new(width.try_into()?)
             .write_to(&mut inner[1..3])
-            .unwrap();
+            .expect("implementation bug: width of video packet is wrong");
         zerocopy::U16::<O>::new(height.try_into()?)
             .write_to(&mut inner[3..5])
-            .unwrap();
+            .expect("implementation bug: height of video packet is wrong");
         inner[5] = chans.try_into()?;
 
         Ok(Self(inner, PhantomData))

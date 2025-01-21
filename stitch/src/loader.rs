@@ -8,7 +8,7 @@ pub trait OwnedWriteBuffer {
     where
         Self: 'a;
 
-    fn owned_to_view(&mut self) -> Self::View<'_>;
+    fn owned_to_view(&mut self) -> Option<Self::View<'_>>;
 }
 
 impl<T: std::ops::DerefMut<Target = [u8]>> OwnedWriteBuffer for T {
@@ -17,8 +17,8 @@ impl<T: std::ops::DerefMut<Target = [u8]>> OwnedWriteBuffer for T {
     where
         Self: 'a;
 
-    fn owned_to_view(&mut self) -> Self::View<'_> {
-        self
+    fn owned_to_view(&mut self) -> Option<Self::View<'_>> {
+        Some(self)
     }
 }
 
@@ -43,7 +43,11 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
             loop {
                 match req_recv.recv() {
                     Ok((mut req, resp_send)) => {
-                        cb(req.owned_to_view().as_mut());
+                        if let Some(mut v) = req.owned_to_view() {
+                            cb(v.as_mut())
+                        } else {
+                            tracing::error!("attempted to copy zero bytes, ignoring...");
+                        }
                         // if the receiver has been dropped, they don't want their buffer back!
                         _ = resp_send.send(req);
                     }

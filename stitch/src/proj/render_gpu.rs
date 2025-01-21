@@ -1,4 +1,4 @@
-use std::{f32::consts::PI, num::NonZero, ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{f32::consts::PI, ops::DerefMut, path::PathBuf, sync::Arc};
 
 use encase::ShaderType;
 use glam::Mat4;
@@ -507,7 +507,7 @@ impl GpuProjector {
             ctx: glob_gpu::get_global_context(),
             buf: self.inp_frames.clone(),
             offset,
-            size: size.try_into().unwrap(),
+            size,
         }
     }
 }
@@ -516,7 +516,7 @@ pub struct GpuDirectBufferWrite {
     ctx: Arc<Context>,
     buf: Arc<Buffer>,
     offset: u64,
-    size: NonZero<u64>,
+    size: u64,
 }
 
 impl OwnedWriteBuffer for GpuDirectBufferWrite {
@@ -525,7 +525,10 @@ impl OwnedWriteBuffer for GpuDirectBufferWrite {
     where
         Self: 'a;
 
-    fn owned_to_view(&mut self) -> Self::View<'_> {
-        self.ctx.write_with(&self.buf, self.offset, self.size)
+    fn owned_to_view(&mut self) -> Option<Self::View<'_>> {
+        match self.size.try_into() {
+            Ok(size) => Some(self.ctx.write_with(&self.buf, self.offset, size)),
+            Err(_) => None,
+        }
     }
 }

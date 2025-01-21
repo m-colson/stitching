@@ -54,8 +54,8 @@ impl<'a> MemMapper<'a> {
 struct MappingCallback<'a>(
     &'a wgpu::Buffer,
     wgpu::BufferSlice<'a>,
-    Option<Box<dyn FnOnce(wgpu::BufferView<'a>) + Send + 'a>>,
-    kanal::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    Box<dyn FnOnce(wgpu::BufferView<'a>) + Send + 'a>,
+    kanal::OneshotReceiver<Result<(), wgpu::BufferAsyncError>>,
 );
 
 impl<'a> MappingCallback<'a> {
@@ -63,35 +63,65 @@ impl<'a> MappingCallback<'a> {
         b: &'a wgpu::Buffer,
         cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
     ) -> Self {
-        let (res_send, res_recv) = kanal::bounded(1);
+        let (res_send, res_recv) = kanal::oneshot();
         let bs = b.slice(..);
-        bs.map_async(wgpu::MapMode::Read, move |v| res_send.send(v).unwrap());
-        Self(b, bs, Some(Box::new(cb)), res_recv)
+        bs.map_async(wgpu::MapMode::Read, move |v| {
+            // if this send fails, the user must have dropped the callback,
+            // so they don't care about the result
+            _ = res_send.send(v);
+        });
+        Self(b, bs, Box::new(cb), res_recv)
     }
 
     pub fn new_write(
         b: &'a wgpu::Buffer,
         cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
     ) -> Self {
-        let (res_send, res_recv) = kanal::bounded(1);
+        let (res_send, res_recv) = kanal::oneshot();
         let bs = b.slice(..);
-        bs.map_async(wgpu::MapMode::Write, move |v| res_send.send(v).unwrap());
-        Self(b, bs, Some(Box::new(cb)), res_recv)
+        bs.map_async(wgpu::MapMode::Write, move |v| {
+            // if this send fails, the user must have dropped the callback,
+            // so they don't care about the result
+            _ = res_send.send(v);
+        });
+        Self(b, bs, Box::new(cb), res_recv)
     }
 }
 
 impl MappingCallback<'_> {
-    async fn wait_async(mut self) {
-        self.3.clone().to_async().recv().await.unwrap().unwrap();
+    async fn wait_async(self) {
+        if mapping_failed(self.3.to_async().recv().await) {
+            return;
+        }
+
         let data = self.1.get_mapped_range();
-        self.2.take().expect("wait called twice")(data);
+        self.2(data);
         self.0.unmap();
     }
 
-    pub fn wait(mut self) {
-        self.3.clone().recv().unwrap().unwrap();
+    pub fn wait(self) {
+        if mapping_failed(self.3.recv()) {
+            return;
+        }
+
         let data = self.1.get_mapped_range();
-        self.2.take().expect("wait called twice")(data);
+        self.2(data);
         self.0.unmap();
     }
+}
+
+fn mapping_failed(
+    res: Result<Result<(), wgpu::BufferAsyncError>, kanal::OneshotReceiveError>,
+) -> bool {
+    let Ok(res) = res else {
+        #[cfg(feature = "tracing")]
+        tracing::error!("failed to receive confirmation of mapping operation");
+        return true;
+    };
+    if let Err(err) = res {
+        #[cfg(feature = "tracing")]
+        tracing::error!("mapping operation failed: {err}");
+        return true;
+    }
+    false
 }

@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 tokio_task_poller = ["dep:tokio"]
 obj-file = ["dep:obj-rs"]
+tracing = ["dep:tracing"]
 
 [dependencies]
 encase = "0.10.0"
@@ -16,4 +17,5 @@ obj-rs = { version = "0.7.4", optional = true, default-features = false }
 pollster = "0.4.0"
 thiserror = "2.0.3"
 tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 wgpu = { version = "23.0.0", default-features = false, features = ["wgsl"] }

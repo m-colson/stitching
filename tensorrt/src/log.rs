@@ -45,14 +45,14 @@ pub struct Logger {
 enum LoggerCb {
     Static(&'static (dyn Fn(Severity, &str) + Sync)),
     #[allow(clippy::type_complexity)]
-    Owned(Mutex<Box<dyn Fn(Severity, &str) + Send + 'static>>),
+    Owned(Box<dyn Fn(Severity, &str) + Send + 'static>),
 }
 
 impl LoggerCb {
     pub fn run(&self, severity: Severity, msg: &str) {
         match self {
             Self::Static(f) => f(severity, msg),
-            Self::Owned(f) => (f.lock().unwrap())(severity, msg),
+            Self::Owned(f) => f(severity, msg),
         }
     }
 }
@@ -66,7 +66,9 @@ impl Logger {
             msg: *const core::ffi::c_char,
         ) {
             let logger = unsafe { &mut *(this as *mut _ as *mut Logger) };
-            let msg = CStr::from_ptr(msg).to_str().unwrap();
+            let msg = CStr::from_ptr(msg)
+                .to_str()
+                .unwrap_or("<<non-utf8 message>>");
             logger.cb.run(severity, msg);
         }
 
@@ -83,7 +85,7 @@ impl Logger {
 
     #[inline]
     pub fn new_owned(cb: impl Fn(Severity, &str) + Send + 'static) -> Self {
-        Self::new_with_cb(LoggerCb::Owned(Mutex::new(Box::new(cb))))
+        Self::new_with_cb(LoggerCb::Owned(Box::new(cb)))
     }
 
     #[inline]
