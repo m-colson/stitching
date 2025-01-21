@@ -7,9 +7,5 @@ edition = "2021"
 tracing = ["dep:tracing"]
 
 [dependencies]
-clap = { version = "4.5.23", default-features = false, features = [
-    "derive",
-    "std",
-] }
 tensorrt-sys = { path = "../tensorrt-sys" }
 tracing = { workspace = true, optional = true }

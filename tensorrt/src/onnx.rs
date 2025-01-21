@@ -1,4 +1,4 @@
-use std::{ffi::CStr, marker::PhantomData};
+use std::{ffi::CStr, fmt::Debug, marker::PhantomData};
 
 use crate::{
     log::{Logger, Severity},
@@ -46,17 +46,45 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn get_errors(&self) -> Vec<ParserError> {
+    pub fn get_errors(&self) -> Vec<ParserError<'_>> {
         let vfuncs = unsafe { self.vfuncs() };
         let err_count = unsafe { ((*vfuncs).get_nb_errors)(self.0) };
 
-        println!("err count: {err_count}");
-        // let mut out = Vec::new();
-        // for i in 0..err_count {
-        //     out.push(unsafe { ((*vfuncs).get_error)(self.0, i) });
-        // }
-        Vec::new()
+        (0..err_count)
+            .map(|i| ParserError(unsafe { ((*vfuncs).get_error)(self.0, i) }, PhantomData))
+            .collect()
     }
 }
 
-pub struct ParserError;
+pub struct ParserError<'a>(
+    *const tensorrt_sys::onnx::IParserError,
+    PhantomData<&'a Parser<'a>>,
+);
+
+impl ParserError<'_> {
+    unsafe fn vfuncs(&self) -> *const tensorrt_sys::onnx::IParserErrorVTable {
+        (*self.0).vtable_ as _
+    }
+
+    pub fn code(&self) -> tensorrt_sys::onnx::ErrorCode {
+        unsafe { ((*self.vfuncs()).code)(self.0) }
+    }
+
+    pub fn desc(&self) -> &CStr {
+        unsafe { CStr::from_ptr(((*self.vfuncs()).desc)(self.0)) }
+    }
+
+    pub fn node_name(&self) -> &CStr {
+        unsafe { CStr::from_ptr(((*self.vfuncs()).node_name)(self.0)) }
+    }
+}
+
+impl Debug for ParserError<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParserError")
+            .field("code", &self.code())
+            .field("desc", &self.desc())
+            .field("node_name", &self.node_name())
+            .finish()
+    }
+}

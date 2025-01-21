@@ -28,6 +28,8 @@ impl RuntimeEngineContext<'_> {
     }
 }
 
+unsafe impl Send for RuntimeEngineContext<'_> {}
+
 pub struct Runtime<'a>(*mut tensorrt_sys::IRuntime, PhantomData<&'a Logger>);
 
 impl<'a> Runtime<'a> {

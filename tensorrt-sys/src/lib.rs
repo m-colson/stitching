@@ -32,6 +32,28 @@ pub use vtables::*;
 
 pub use autobind::*;
 
+#[derive(Debug)]
+pub struct CudaError(root::cudaError);
+
+impl core::fmt::Display for CudaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+impl core::error::Error for CudaError {}
+
+pub type CudaResult<T> = ::std::result::Result<T, CudaError>;
+
+impl From<root::cudaError> for CudaResult<()> {
+    fn from(err: root::cudaError) -> Self {
+        match err {
+            root::cudaError::cudaSuccess => Ok(()),
+            err => Err(CudaError(err)),
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 #[repr(C)]
 #[derive(PartialEq, Eq)]
