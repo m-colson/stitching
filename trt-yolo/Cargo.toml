@@ -14,7 +14,6 @@ v11x = []
 [dependencies]
 tensorrt = { version = "0.1.0", path = "../tensorrt" }
 image.workspace = true
-ndarray = { version = "0.16.1" }
 imageproc = "0.25.0"
 half = { version = "2.4.1", features = ["bytemuck"] }
 bytemuck = "1.21.0"

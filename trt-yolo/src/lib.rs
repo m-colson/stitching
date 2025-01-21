@@ -5,6 +5,8 @@ use tensorrt::{CudaBuffer, CudaStream, ExecutionContext};
 pub mod boxes;
 pub mod coco;
 
+pub use boxes::{nms_cpu, BoundingClass};
+
 pub struct Inferer<'a> {
     ctx: ExecutionContext<'a>,
     stream: CudaStream,
@@ -97,7 +99,7 @@ impl Which {
             // #[cfg(feature = "v11n")]
             // Which::V11N => [1, 640, 640, 3],
             #[cfg(feature = "v11s")]
-            Which::V11S => [1, 640, 640, 3],
+            Which::V11S => [1, 640, 640, 4],
             // #[cfg(feature = "v11m")]
             // Which::V11M => [1, 640, 640, 3],
             // #[cfg(feature = "v11l")]

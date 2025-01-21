@@ -111,6 +111,16 @@ impl BoundingClass {
         }
     }
 
+    #[inline]
+    pub fn conf_rgba(&self) -> [u8; 4] {
+        let c = self.confidence * 2. - 1.;
+        if c >= 0. {
+            [((1. - c.clamp(0., 1.)) * 255.) as _, 255, 0, 255]
+        } else {
+            [255, ((1. + c.clamp(-1., 0.)) * 255.) as _, 0, 255]
+        }
+    }
+
     pub fn rescale(
         &self,
         old_width: f32,

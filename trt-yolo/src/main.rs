@@ -1,15 +1,15 @@
 use std::time::Instant;
 
-use image::{imageops, EncodableLayout, GenericImageView, Rgb};
+use image::{imageops, EncodableLayout, GenericImageView, Rgba};
 use tensorrt::RuntimeEngineContext;
-use trt_yolo::{boxes::nms_cpu, Inferer, Which};
+use trt_yolo::{nms_cpu, Inferer, Which};
 
 fn main() {
     let which = Which::best();
 
     let img = image::open("../detect-samples/cars.jpg")
         .unwrap()
-        .into_rgb8();
+        .into_rgba8();
     let crop_size = img.width().min(img.height());
     let left = (img.width() - crop_size) / 2;
 
@@ -35,7 +35,7 @@ fn main() {
         .for_each(|b| {
             println!("{b}");
             let bound_rect = b.to_imageproc_rect();
-            imageproc::drawing::draw_hollow_rect_mut(&mut img, bound_rect, Rgb(b.conf_rgb()));
+            imageproc::drawing::draw_hollow_rect_mut(&mut img, bound_rect, Rgba(b.conf_rgba()));
         });
 
     img.save("out.png").unwrap();
