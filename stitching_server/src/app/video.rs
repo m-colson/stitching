@@ -1,6 +1,4 @@
-use std::borrow::Cow;
-
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 
 use crate::util::{IntervalTimer, Metrics};
@@ -14,12 +12,10 @@ pub async fn conn_state_machine(state: App, socket: WebSocket) {
     let mut recv_task = tokio::spawn(recv_loop(state.clone(), receiver));
 
     tokio::select! {
-        rv_a = (&mut send_task) => {
-            _ = rv_a.inspect_err(|e| println!("Error sending messages {e:?}"));
+        _ = (&mut send_task) => {
             recv_task.abort();
         },
-        rv_b = (&mut recv_task) => {
-            _ = rv_b.inspect_err(|e| println!("Error receiving messages {e:?}"));
+        _ = (&mut recv_task) => {
             send_task.abort();
         }
     }
@@ -43,7 +39,7 @@ where
     _ = sender
         .send(Message::Close(Some(CloseFrame {
             code: axum::extract::ws::close_code::AWAY,
-            reason: Cow::from("No more frames"),
+            reason: Utf8Bytes::from_static("No more frames"),
         })))
         .await;
 }
@@ -57,7 +53,7 @@ where
             let Some(p) = RecvPacket::from_raw(&raw) else {
                 tracing::error!(
                     "failed to parse packet from client starting with {:?}",
-                    &raw[..raw.len().min(8)]
+                    &raw[..raw.len().min(64)]
                 );
                 continue;
             };
@@ -70,12 +66,9 @@ where
                     });
                 }
                 RecvPacket::Timing(timing) => {
-                    let (took, delay) = timing.info_now();
+                    let (dur, delay) = timing.info_now();
                     Metrics::push("client-update", delay.as_secs_f64() * 1000.);
-
-                    let took = format!("{took:.1?}");
-                    let delay = format!("{delay:.1?}");
-                    tracing::info!(delay, took, "client update");
+                    Metrics::push("client-decode", dur.as_secs_f64() * 1000.);
                 }
             }
         }

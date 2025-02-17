@@ -1,5 +1,6 @@
 use std::{io, sync::Arc};
 
+use stitch::proj::DepthData;
 use tensorrt::{CudaBuffer, CudaError, CudaStream, RuntimeEngineContext};
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -15,55 +16,65 @@ pub enum InferError {
 
 pub type InferResult<T> = ::std::result::Result<T, InferError>;
 
-type BoundHandler = Box<dyn Fn(Vec<BoundingClass>) + Send>;
+type BoundHandler<T> = Box<dyn FnMut(usize, Option<T>, Vec<BoundingClass>, DepthData) + Send>;
 
 #[derive(Clone)]
-pub struct InferHost {
-    in_bufs: Arc<[Mutex<CudaBuffer>]>,
-    // stream: Arc<CudaStream>,
-    ready_send: kanal::AsyncSender<(usize, BoundHandler)>,
+pub struct InferHost<T> {
+    in_bufs: Arc<[Mutex<(CudaBuffer, Option<T>, DepthData<'static>)>]>,
+    ready_send: kanal::AsyncSender<BoundHandler<T>>,
 }
 
-impl InferHost {
-    pub fn spawn(n: usize) -> InferResult<Self> {
+impl<T: Send + 'static> InferHost<T> {
+    pub fn spawn(num_bufs: usize) -> InferResult<Self> {
         let which = Which::best();
 
-        let in_bufs = (0..n)
-            .map(|_| CudaBuffer::new(which.input_elems() * size_of::<u8>()).map(Mutex::new))
+        let in_bufs = (0..num_bufs)
+            .map(|_| {
+                CudaBuffer::new(which.input_elems() * size_of::<u8>())
+                    .map(|b| Mutex::new((b, None, DepthData::new_zeroed(640, 640))))
+            })
             .collect::<Result<Vec<_>, _>>()
             .map(Arc::<[_]>::from)?;
 
-        let mut out_mem = CudaBuffer::new(which.out_elems() * size_of::<half::f16>())?;
+        let (ready_send, ready_recv) = kanal::bounded_async::<BoundHandler<T>>(num_bufs);
 
-        let stream = Arc::new(CudaStream::new()?);
-        let runtime = RuntimeEngineContext::new_engine_slice(&which.plan_data()?);
-        runtime.as_ctx().set_output_tensor(c"output0", &mut out_mem);
-
-        let (ready_send, ready_recv) = kanal::bounded_async::<(usize, BoundHandler)>(n);
-
-        let host_stream = stream.clone();
         let host_in_bufs = in_bufs.clone();
         tokio::spawn(async move {
+            let mut out_mem = CudaBuffer::new(which.out_elems() * size_of::<half::f16>()).unwrap();
             let mut out_buf = vec![half::f16::from_f32_const(0.); which.out_elems()];
+
+            let runtime = RuntimeEngineContext::new_engine_slice(&which.plan_data().unwrap());
+            runtime.as_ctx().set_output_tensor(c"output0", &mut out_mem);
+
+            let stream = CudaStream::new().unwrap();
             loop {
                 match ready_recv.recv().await {
-                    Ok((in_index, f)) => {
-                        let locked_buf: &Mutex<CudaBuffer> = &host_in_bufs[in_index];
-                        let in_buf = locked_buf.lock().await;
-                        let ctx = runtime.as_ctx();
+                    Ok(mut f) => {
+                        for (n, locked_buf) in host_in_bufs.iter().enumerate() {
+                            let mut locked = locked_buf.lock().await;
 
-                        ctx.set_input_tensor(c"images", &in_buf);
-                        ctx.enqueue(&host_stream);
-                        if let Err(err) = out_mem
-                            .copy_to_async(bytemuck::cast_slice_mut(&mut out_buf), &host_stream)
-                        {
-                            tracing::error!("while loading bound buffer: {}", err);
-                            continue;
+                            let ctx = runtime.as_ctx();
+                            ctx.set_input_tensor(c"images", &locked.0);
+
+                            // enqueue running the model
+                            ctx.enqueue(&stream);
+
+                            if let Err(err) = out_mem
+                                .copy_to_async(bytemuck::cast_slice_mut(&mut out_buf), &stream)
+                            {
+                                tracing::error!("while loading bound buffer: {}", err);
+                                continue;
+                            }
+
+                            stream.synchronize().unwrap();
+
+                            f(
+                                n,
+                                locked.1.take(),
+                                trt_yolo::nms_cpu(&out_buf, which.out_shape(), 0.65, 0.5),
+                                locked.2.to_ref(),
+                            )
                         }
-
-                        host_stream.synchronize().unwrap();
-
-                        f(trt_yolo::nms_cpu(&out_buf, which.out_shape(), 0.65, 0.5))
                     }
                     Err(err) => {
                         match err {
@@ -82,21 +93,28 @@ impl InferHost {
 
         Ok(Self {
             in_bufs,
-            // stream,
             ready_send,
         })
     }
 
-    pub async fn run_input(
-        &self,
-        n: usize,
-        data: &[u8],
-        handler: impl Fn(Vec<BoundingClass>) + Send + 'static,
-    ) {
-        if let Err(err) = self.in_bufs[n].lock().await.copy_from(data) {
+    pub fn run_input(&self, n: usize, custom: T, data: &[u8], depth: DepthData<'_>) {
+        let Ok(mut lock) = self.in_bufs[n].try_lock() else {
+            // lock is already held, skip this frame or we will block.
+            return;
+        };
+        if let Err(err) = lock.0.copy_from(data) {
             tracing::error!("error setting infer input {n}: {err}");
-        } else if let Err(err) = self.ready_send.send((n, Box::new(handler))).await {
-            tracing::error!("error setting infer input {n}: {err}")
+        }
+        lock.1 = Some(custom);
+        lock.2.copy_from(&depth);
+    }
+
+    pub async fn req_infer(
+        &self,
+        handler: impl FnMut(usize, Option<T>, Vec<BoundingClass>, DepthData) + Send + 'static,
+    ) {
+        if let Err(err) = self.ready_send.send(Box::new(handler)).await {
+            tracing::error!("error requesting infer: {err}")
         }
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     fs,
     future::Future,
     io::{self, Write},
@@ -14,7 +15,7 @@ use axum::{
 };
 
 pub fn ws_upgrader<M, S: Send + Sync + Clone + 'static, Fut>(
-    cb: impl FnOnce(S, WebSocket) -> Fut + Send + Clone + 'static,
+    cb: impl FnOnce(S, WebSocket) -> Fut + Send + Sync + Clone + 'static,
 ) -> impl Handler<(M, State<S>, WebSocketUpgrade), S>
 where
     WebSocketUpgrade: FromRequest<S, M>,
@@ -63,8 +64,8 @@ impl IntervalTimer {
         let took = now - self.base_time;
         Metrics::push(name, took.as_secs_f64() * 1000.);
 
-        let took = format!("{took:.1?}");
-        tracing::info!(took, "{}", name);
+        // let took = format!("{took:.1?}");
+        // tracing::info!(took, "{}", name);
 
         self.mark_time = now;
     }
@@ -74,9 +75,9 @@ impl IntervalTimer {
         let diff = self.base_time.elapsed();
         Metrics::push(name, diff.as_secs_f64() * 1000.);
 
-        let fps = format!("{:.1}", 1. / diff.as_secs_f32());
-        let took = format!("{diff:.1?}");
-        tracing::info!(fps, took, "{}", name);
+        // let fps = format!("{:.1}", 1. / diff.as_secs_f32());
+        // let took = format!("{diff:.1?}");
+        // tracing::info!(fps, took, "{}", name);
     }
 }
 
@@ -113,6 +114,10 @@ impl Metrics {
             .collect()
     }
 
+    pub fn reset() {
+        GLOBAL_METRICS.lock().unwrap().marks = HashMap::new();
+    }
+
     pub fn save_csv(out_path: impl AsRef<path::Path>) -> io::Result<()> {
         let mut out = fs::File::create(out_path)?;
 
@@ -126,9 +131,32 @@ impl Metrics {
 
         Ok(())
     }
+
+    pub fn with(f: impl FnOnce(&Self)) {
+        f(&*GLOBAL_METRICS.lock().unwrap())
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+impl Display for Metrics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut metrics = self.marks.iter().collect::<Vec<_>>();
+        metrics.sort_by_key(|(n, _)| *n);
+
+        let mut write_comma = false;
+        for (n, m) in metrics {
+            if write_comma {
+                f.write_str(", ")?;
+            }
+
+            write!(f, "{n} = {:.1?}σ{:.1?}", m.average(), m.std_dev())?;
+
+            write_comma = true;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Default)]
 struct Metric {
     sum: f64,
     sum_sq: f64,

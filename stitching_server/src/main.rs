@@ -39,6 +39,14 @@ impl Args {
             } => {
                 let app = App::from_toml_cfg("live.toml", 1280, 720).await?;
 
+                let monitoring_handle = tokio::spawn(async {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        Metrics::with(|m| tracing::info!("timing {}", m));
+                        Metrics::reset();
+                    }
+                });
+
                 let listen = format!("{}:{}", host, port);
                 match timeout {
                     Some(n) => {
@@ -52,29 +60,16 @@ impl Args {
                     }
                     None => app.listen_and_serve(listen).await?,
                 };
+
+                monitoring_handle.abort();
             }
-            // ArgCommand::ListLive => {
-            //     let cams = nokhwa::query(
-            //         nokhwa::native_api_backend()
-            //             .ok_or_else(|| anyhow!("no camera backend found"))?,
-            //     )?;
-            //     for c in cams {
-            //         println!(
-            //             "{} -> {:?} ({:?})",
-            //             c.index(),
-            //             c.human_name(),
-            //             c.description()
-            //         );
-            //     }
-            // }
             #[cfg(feature = "capture")]
             ArgCommand::CaptureLive => {
-                let width = 1920;
-                let height = 1080;
-
-                let cfg = stitch::proj::Config::open("live.toml")?;
-                let mut buf = vec![0u8; (width * height * 4) as usize].into_boxed_slice();
+                use stitch::{camera::live, proj};
+                let cfg = proj::Config::<live::Config>::open("live.toml")?;
                 for (i, c) in cfg.cameras.into_iter().enumerate() {
+                    let [width, height] = c.meta.resolution;
+                    let mut buf = vec![0u8; (width * height * 4) as usize].into_boxed_slice();
                     let c = c.load::<Box<[u8]>>()?;
                     let ticket = c.data.give(buf)?;
                     buf = ticket.block_take()?;

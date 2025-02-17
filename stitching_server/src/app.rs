@@ -73,12 +73,12 @@ impl App {
         self.0.stitcher.next_frame_msg().await
     }
 
-    pub fn update_proj_style<F: FnOnce(&mut ProjectionStyle) + Send + 'static>(&self, f: F) {
+    pub fn update_proj_style(&self, f: impl FnOnce(&mut ProjectionStyle) + Send + 'static) {
         self.0.stitcher.update_proj_style(f);
     }
 
     #[allow(dead_code)]
-    pub fn update_view_style<F: FnOnce(&mut ViewStyle) + Send + 'static>(&self, f: F) {
+    pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
         self.0.stitcher.update_view_style(f);
     }
 }

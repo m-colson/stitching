@@ -1,13 +1,13 @@
 use std::{
-    marker::PhantomData,
+    io::{Cursor, Read},
     ops::{Deref, DerefMut},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     time::{Duration, Instant},
 };
 
 use axum::extract::ws::Message;
 use stitch::{buf::FrameSize, proj::ProjectionStyle};
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use zerocopy::{little_endian, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
@@ -71,50 +71,76 @@ impl SettingsPacket {
     }
 }
 
-pub struct VideoPacket<O: zerocopy::ByteOrder = zerocopy::LittleEndian>(Box<[u8]>, PhantomData<O>);
+pub struct VideoPacket(Arc<[u8]>);
 
-impl<O: zerocopy::ByteOrder> VideoPacket<O> {
+impl VideoPacket {
     #[inline]
     pub fn new(width: usize, height: usize, chans: usize) -> stitch::Result<Self> {
         let mut inner = <[u8]>::new_box_zeroed_with_elems(width * height * chans + 16).unwrap();
         inner[0] = PacketKind::UpdateFrame as _;
-        zerocopy::U16::<O>::new(width.try_into()?)
+        little_endian::U16::new(width.try_into()?)
             .write_to(&mut inner[1..3])
             .expect("implementation bug: width of video packet is wrong");
-        zerocopy::U16::<O>::new(height.try_into()?)
+        little_endian::U16::new(height.try_into()?)
             .write_to(&mut inner[3..5])
             .expect("implementation bug: height of video packet is wrong");
         inner[5] = chans.try_into()?;
 
-        Ok(Self(inner, PhantomData))
+        Ok(Self(inner.into()))
     }
 
     #[inline]
     pub fn update_time(&mut self) {
-        zerocopy::F64::<O>::new(TimingPacket::new_now().server_send)
-            .write_to(&mut self.0[8..16])
-            .unwrap();
+        if let Some(inner) = &mut self.mut_inner_data() {
+            little_endian::F64::new(TimingPacket::new_now().server_send)
+                .write_to(&mut inner[8..16])
+                .unwrap();
+        }
     }
 
     #[inline]
-    pub fn take_message(&mut self) -> Message {
-        let new_buf = Self::new(self.width(), self.height(), self.chans())
-            .expect("dimension should already be safe if this type exists")
-            .0;
-        let old_buf = std::mem::replace(&mut self.0, new_buf);
-        Message::Binary(old_buf.into_vec())
+    pub fn to_message(&self) -> tokio::task::JoinHandle<Message> {
+        let buf = self.0.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut out = Vec::new();
+            flate2::GzBuilder::new()
+                .buf_read(Cursor::new(&buf), flate2::Compression::fast())
+                .read_to_end(&mut out)
+                .unwrap();
+
+            // tracing::debug!(
+            //     "compressed {:?} bytes to {:?} bytes",
+            //     self.0.len(),
+            //     out.len()
+            // );
+
+            Message::Binary(out.into())
+        })
+    }
+
+    fn mut_inner_data(&mut self) -> Option<&mut [u8]> {
+        let buf = Arc::get_mut(&mut self.0);
+        match buf {
+            Some(buf) => Some(buf),
+            None => {
+                tracing::error!(
+                    "failed to get video packet buffer because another reference to it exists"
+                );
+                None
+            }
+        }
     }
 }
 
-impl<O: zerocopy::ByteOrder> FrameSize for VideoPacket<O> {
+impl FrameSize for VideoPacket {
     fn width(&self) -> usize {
-        zerocopy::U16::<O>::ref_from_bytes(&self.0[1..3])
+        little_endian::U16::ref_from_bytes(&self.0[1..3])
             .unwrap()
             .get() as _
     }
 
     fn height(&self) -> usize {
-        zerocopy::U16::<O>::ref_from_bytes(&self.0[3..5])
+        little_endian::U16::ref_from_bytes(&self.0[3..5])
             .unwrap()
             .get() as _
     }
@@ -124,7 +150,7 @@ impl<O: zerocopy::ByteOrder> FrameSize for VideoPacket<O> {
     }
 }
 
-impl<O: zerocopy::ByteOrder> Deref for VideoPacket<O> {
+impl Deref for VideoPacket {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -132,9 +158,10 @@ impl<O: zerocopy::ByteOrder> Deref for VideoPacket<O> {
     }
 }
 
-impl<O: zerocopy::ByteOrder> DerefMut for VideoPacket<O> {
+impl DerefMut for VideoPacket {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0[16..]
+        self.mut_inner_data()
+            .map_or(&mut [], |inner| &mut inner[16..])
     }
 }
 
@@ -169,7 +196,18 @@ impl TimingPacket {
             return None;
         }
 
-        Self::ref_from_bytes(data).ok().copied()
+        #[repr(align(8))]
+        #[derive(Default)]
+        struct Data([u8; 32]);
+
+        if size_of::<Data>() != size_of_val(data) {
+            return None;
+        }
+
+        let mut new_data = Data::default();
+        new_data.0.copy_from_slice(data);
+
+        Self::ref_from_bytes(&new_data.0).ok().cloned()
     }
 
     #[inline]

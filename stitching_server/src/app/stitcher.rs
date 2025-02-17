@@ -1,59 +1,127 @@
-use std::io::Cursor;
+use std::{fs::File, io::BufReader};
 
 use axum::extract::ws::Message;
 use stitch::{
     buf::FrameSize,
     camera::{live, Camera},
     loader::{self, Loader, OwnedWriteBuffer},
-    proj::{self, GpuDirectBufferWrite, GpuProjector, ProjectionStyle, ViewStyle},
+    proj::{
+        self, DepthData, GpuDirectBufferWrite, GpuProjector, InverseView, ProjectionStyle,
+        ViewStyle,
+    },
     Result,
 };
-use tokio::runtime::Handle;
 
-use crate::util::IntervalTimer;
+use crate::{infer_host::InferHost, util::IntervalTimer};
 
 use super::proto::VideoPacket;
-pub enum UpdateFn {
+pub enum Update {
     ProjStyle(Box<dyn FnOnce(&mut ProjectionStyle) + Send>),
     ViewStyle(Box<dyn FnOnce(&mut ViewStyle) + Send>),
+    Bounds(Vec<glam::Vec4>),
 }
 
 pub struct Sticher {
     msg_recv: kanal::AsyncReceiver<Message>,
-    update_send: kanal::Sender<UpdateFn>,
+    update_send: kanal::Sender<Update>,
 }
 
 impl Sticher {
     pub fn from_cfg_gpu(cfg: proj::Config<live::Config>, proj_w: usize, proj_h: usize) -> Self {
-        let subs = 4;
+        let subs = 8;
 
-        let cam_res = cfg.cameras[0]
-            .meta
-            .resolution
-            .expect("missing resolution for camera 0");
+        let cam_resolutions = cfg
+            .cameras
+            .iter()
+            .map(|c| c.meta.resolution)
+            .collect::<Vec<_>>();
 
-        let mut proj = GpuProjector::builder()
+        let mut proj_builder = GpuProjector::builder()
             .num_subs(subs)
-            .input_size(
-                cam_res[0],
-                cam_res[1],
-                cfg.cameras
-                    .len()
-                    .try_into()
-                    .expect("number of cameras is greater than a u32 can store"),
-            )
+            .input_sizes(cam_resolutions)
             .out_size(proj_w, proj_h)
             .cylinder_bound()
-            .masks_from_cfgs(&cfg.cameras)
-            .model(|m| m.obj_file_reader(Cursor::new(include_str!("../../assets/whole_plane.obj"))))
-            .build();
+            .masks_from_cfgs(&cfg.cameras);
+
+        if let Some(model) = &cfg.model {
+            proj_builder = proj_builder
+                .model(|m| {
+                    m.obj_file_reader(BufReader::new(
+                        File::open(&model.path).expect("unable to read model"),
+                    ))
+                })
+                .model_origin(model.origin)
+                .model_scale(model.scale.unwrap_or([1., 1., 1.]))
+        }
+
+        let mut proj = proj_builder.build();
 
         let (msg_send, msg_recv) = kanal::bounded(0);
-        let (update_send, update_recv) = kanal::bounded(4);
+        let (update_send, update_recv) = kanal::bounded(subs);
 
-        let inferer = crate::infer_host::InferHost::spawn(4).unwrap();
+        let inferer = InferHost::<InverseView>::spawn(subs).unwrap();
 
-        tokio::task::spawn(async move {
+        let req_inferer = inferer.clone();
+        let bound_update_send = update_send.clone_async();
+        tokio::spawn(async move {
+            loop {
+                let (mut done_sends, done_recvs): (Vec<_>, Vec<_>) = (0..subs)
+                    .map(|_| kanal::oneshot::<Vec<glam::Vec4>>())
+                    .map(|(s, r)| (Some(s), r))
+                    .unzip();
+                req_inferer
+                    .req_infer(move |n, view, bbs, depth| {
+                        let mut triangles = Vec::new();
+
+                        if let Some(InverseView(inv_mat)) = view {
+                            for bb in bbs {
+                                let lt_depth = depth.at(bb.xmin() as _, bb.ymin() as _);
+                                let rt_depth = depth.at(bb.xmax() as _, bb.ymin() as _);
+                                // let rb_depth = depth.at(bb.xmin() as _, bb.ymax() as _);
+                                // let lb_depth = depth.at(bb.xmax() as _, bb.ymax() as _);
+
+                                let sbb = bb.rescale(640., 640., 2., 2.);
+                                let lt = inv_mat
+                                    * glam::vec4(sbb.xmin() - 1., -(sbb.ymin() - 1.), lt_depth, 1.);
+                                let lt = lt / lt.w;
+                                let rt = inv_mat
+                                    * glam::vec4(sbb.xmax() - 1., -(sbb.ymin() - 1.), rt_depth, 1.);
+                                let rt = rt / rt.w;
+                                let lb = inv_mat
+                                    * glam::vec4(sbb.xmin() - 1., -(sbb.ymax() - 1.), lt_depth, 1.);
+                                let lb = lb / lb.w;
+                                let rb = inv_mat
+                                    * glam::vec4(sbb.xmax() - 1., -(sbb.ymax() - 1.), rt_depth, 1.);
+                                let rb = rb / rb.w;
+
+                                triangles.extend([rt, lt, lb, lb, rb, rt]);
+                                tracing::info!("{n} {rt:?}: {bb}");
+                            }
+                        }
+
+                        done_sends[n].take().unwrap().send(triangles).unwrap();
+                    })
+                    .await;
+
+                let triangles = futures_util::future::join_all(
+                    done_recvs
+                        .into_iter()
+                        .map(|r| async { r.to_async().recv().await.ok() }),
+                )
+                .await
+                .into_iter()
+                .filter_map(|v| v)
+                .flatten()
+                .collect();
+
+                bound_update_send
+                    .send(Update::Bounds(triangles))
+                    .await
+                    .unwrap();
+            }
+        });
+
+        tokio::spawn(async move {
             let res = SticherInner::from_cfg(&cfg, (proj_w, proj_h), msg_send, update_recv);
             let Ok(inner) =
                 res.inspect_err(|err| tracing::error!("stitcher exiting because {err}"))
@@ -61,14 +129,8 @@ impl Sticher {
                 return;
             };
 
-            let res = SticherInner::run(inner, &mut proj, move |n, img| {
-                tokio::task::block_in_place(|| {
-                    Handle::current().block_on(inferer.run_input(n, img, |bbs| {
-                        for b in bbs {
-                            tracing::info!("bound {b}");
-                        }
-                    }));
-                });
+            let res = SticherInner::run(inner, &mut proj, move |n, view, img, depth| {
+                inferer.run_input(n, view, img, depth);
             })
             .await;
 
@@ -89,18 +151,18 @@ impl Sticher {
         self.msg_recv.recv().await.ok()
     }
 
-    pub fn update_proj_style<F: FnOnce(&mut ProjectionStyle) + Send + 'static>(&self, f: F) {
-        _ = self.update_send.send(UpdateFn::ProjStyle(Box::new(f)));
+    pub fn update_proj_style(&self, f: impl FnOnce(&mut ProjectionStyle) + Send + 'static) {
+        _ = self.update_send.send(Update::ProjStyle(Box::new(f)));
     }
 
-    pub fn update_view_style<F: FnOnce(&mut ViewStyle) + Send + 'static>(&self, f: F) {
-        _ = self.update_send.send(UpdateFn::ViewStyle(Box::new(f)));
+    pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
+        _ = self.update_send.send(Update::ViewStyle(Box::new(f)));
     }
 }
 
 struct SticherInner<B: OwnedWriteBuffer> {
     pub sender: kanal::Sender<Message>,
-    pub update_chan: kanal::Receiver<UpdateFn>,
+    pub update_chan: kanal::Receiver<Update>,
     pub proj_style: ProjectionStyle,
     pub view_style: ViewStyle,
     pub proj_buf: VideoPacket,
@@ -112,34 +174,28 @@ impl<B: OwnedWriteBuffer + 'static> SticherInner<B> {
         cfg: &proj::Config<live::Config>,
         proj_size: (usize, usize),
         sender: kanal::Sender<Message>,
-        update_chan: kanal::Receiver<UpdateFn>,
+        update_chan: kanal::Receiver<Update>,
     ) -> Result<Self> {
         let cams = cfg
             .cameras
             .iter()
-            .filter_map(|cfg| match cfg.clone().load() {
+            .map(|cfg| match cfg.clone().load() {
                 Ok(cam) => {
                     let (w, h, c) = cam.data.frame_size();
-                    tracing::info!("loaded camera {:?} ({w} * {h} * {c})", cfg.meta.live_index);
-                    Some(cam)
+                    tracing::info!("loaded camera {:?} ({w} * {h} * {c})", cfg.meta.mode);
+                    cam
                 }
                 Err(err) => {
                     tracing::error!("{err}");
 
-                    let out = cfg.meta.resolution.map(|res| {
-                        cfg.load_with(Loader::new_blocking(res[0], res[1], 4, move |b| {
+                    cfg.load_with(Loader::new_blocking(
+                        cfg.meta.resolution[0],
+                        cfg.meta.resolution[1],
+                        4,
+                        move |b| {
                             b.fill(255);
-                        }))
-                    });
-
-                    if out.is_none() {
-                        tracing::error!(
-                            "missing fallback resolution for camera {}, removing it from rendering",
-                            cfg.meta.live_index
-                        )
-                    }
-
-                    out
+                        },
+                    ))
                 }
             })
             .collect::<Vec<_>>();
@@ -161,13 +217,10 @@ impl SticherInner<GpuDirectBufferWrite> {
     pub async fn run(
         mut self,
         proj: &mut GpuProjector,
-        sub_handler: impl FnOnce(usize, &[u8]) + Send + Clone,
+        sub_handler: impl FnOnce(usize, InverseView, &[u8], DepthData<'_>) + Send + Clone,
     ) -> stitch::Result<()> {
-        // first frame load takes much longer, do it before we starting profiling.
-        loader::discard_tickets(proj.take_input_buffers(&self.cams)?).await;
-
         let mut timer = IntervalTimer::new();
-        while self.avail_updates() {
+        while self.avail_updates(proj) {
             if let ViewStyle::Orbit {
                 theta,
                 frame_per_rev,
@@ -183,31 +236,31 @@ impl SticherInner<GpuDirectBufferWrite> {
             proj.update_cam_specs(&self.cams);
             proj.update_proj_view(self.view_style);
             proj.update_sub_views();
-
             timer.mark("setup");
 
             loader::discard_tickets(buf_tickets).await;
-
-            timer.mark("frame load");
+            timer.mark("frame-load");
 
             proj.update_render();
             proj.copy_render_to(&mut self.proj_buf).await;
-
             timer.mark("backward");
 
             self.proj_buf.update_time();
             timer.mark_from_base("generation");
 
-            let msg = self.proj_buf.take_message();
+            let msg_handle = self.proj_buf.to_message();
+
+            proj.wait_for_subs(sub_handler.clone()).await;
+            timer.mark("sub-wait");
+
+            let msg = msg_handle.await.unwrap();
+            timer.mark("encode-wait");
+
             if self.sender.send(msg).is_err() {
                 break;
             }
-
             timer.mark("handoff");
 
-            proj.wait_for_subs(sub_handler.clone()).await;
-
-            timer.mark("subexec");
             timer.log_iters_per_sec("render");
         }
 
@@ -216,12 +269,13 @@ impl SticherInner<GpuDirectBufferWrite> {
     }
 
     #[inline]
-    fn avail_updates(&mut self) -> bool {
+    fn avail_updates(&mut self, proj: &mut GpuProjector) -> bool {
         loop {
             match self.update_chan.try_recv() {
                 Ok(Some(msg)) => match msg {
-                    UpdateFn::ProjStyle(f) => f(&mut self.proj_style),
-                    UpdateFn::ViewStyle(f) => f(&mut self.view_style),
+                    Update::ProjStyle(f) => f(&mut self.proj_style),
+                    Update::ViewStyle(f) => f(&mut self.view_style),
+                    Update::Bounds(tris) => proj.update_bounding_verts(&tris),
                 },
                 Ok(None) => return true,
                 Err(_) => return false,
