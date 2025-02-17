@@ -1,0 +1,8 @@
+[package]
+name = "argus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+argus-sys.path = "../argus-sys"
+cpp-interop = { version = "0.1.0", path = "../cpp-interop" }
