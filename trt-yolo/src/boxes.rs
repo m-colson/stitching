@@ -1,7 +1,24 @@
-use imageproc::rect::Rect;
-use std::{fmt::Display, time::Instant};
+use std::fmt::Display;
 
 use crate::coco;
+
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Rect {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct BoundingClass {
@@ -57,47 +74,47 @@ impl BoundingClass {
     }
 
     #[inline(always)]
-    pub fn xmin(&self) -> f32 {
+    pub const fn xmin(&self) -> f32 {
         self.x_min
     }
 
     #[inline(always)]
-    pub fn ymin(&self) -> f32 {
+    pub const fn ymin(&self) -> f32 {
         self.y_min
     }
 
     #[inline(always)]
-    pub fn xmax(&self) -> f32 {
+    pub const fn xmax(&self) -> f32 {
         self.x_max
     }
 
     #[inline(always)]
-    pub fn ymax(&self) -> f32 {
+    pub const fn ymax(&self) -> f32 {
         self.y_max
     }
 
     #[inline(always)]
-    pub fn corners(&self) -> ((f32, f32), (f32, f32)) {
+    pub const fn corners(&self) -> ((f32, f32), (f32, f32)) {
         ((self.x_min, self.y_min), (self.x_max, self.y_max))
     }
 
     #[inline(always)]
-    pub fn width(&self) -> f32 {
+    pub const fn width(&self) -> f32 {
         self.x_max - self.x_min
     }
 
     #[inline(always)]
-    pub fn height(&self) -> f32 {
+    pub const fn height(&self) -> f32 {
         self.y_max - self.y_min
     }
 
     #[inline(always)]
-    pub fn area(&self) -> f32 {
+    pub const fn area(&self) -> f32 {
         self.area_cache
     }
 
     #[inline(always)]
-    pub fn class_name(&self) -> &'static str {
+    pub const fn class_name(&self) -> &'static str {
         coco::NAMES[self.class]
     }
 
@@ -141,7 +158,12 @@ impl BoundingClass {
 
     #[inline(always)]
     pub fn to_imageproc_rect(&self) -> Rect {
-        Rect::at(self.xmin() as _, self.ymin() as _).of_size(self.width() as _, self.height() as _)
+        Rect::new(
+            self.xmin() as _,
+            self.ymin() as _,
+            self.width() as _,
+            self.height() as _,
+        )
     }
 
     #[inline(always)]
@@ -186,8 +208,6 @@ pub fn nms_cpu(
     if shape[0] != 1 {
         panic!("unexpected tensor shape for nms {:?}", shape);
     }
-
-    let start_time = Instant::now();
 
     let mut filtered_boxes = Vec::new();
     for bbox_off in 0..shape[2] {
@@ -234,14 +254,13 @@ pub fn nms_cpu(
 
     filtered_boxes.sort_unstable_by(|a, b| b.confidence.total_cmp(&a.confidence));
 
-    println!(
-        "class scoring took {:?}us",
-        start_time.elapsed().as_micros()
-    );
+    // println!(
+    //     "class scoring took {:?}us",
+    //     start_time.elapsed().as_micros()
+    // );
 
     let mut acc = Vec::new();
 
-    let start_time = Instant::now();
     for b in filtered_boxes {
         let any_iou = acc.iter().any(|other| b.iou(other) > iou_threshold);
 
@@ -249,8 +268,6 @@ pub fn nms_cpu(
             acc.push(b);
         }
     }
-
-    println!("accing took {:?}us", start_time.elapsed().as_micros());
 
     acc
 }
