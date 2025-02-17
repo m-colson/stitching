@@ -37,9 +37,7 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
         chans: u32,
         mut cb: impl FnMut(&mut [u8]) + Send + 'static,
     ) -> Self {
-        let (req_send, req_recv) = kanal::bounded::<(B, kanal::OneshotSender<B>)>(4);
-
-        tokio::task::spawn_blocking(move || {
+        Self::new_blocking_manual_recv(width, height, chans, move |req_recv| {
             loop {
                 match req_recv.recv() {
                     Ok((mut req, resp_send)) => {
@@ -64,7 +62,18 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
                     }
                 }
             }
-        });
+        })
+    }
+
+    pub fn new_blocking_manual_recv(
+        width: u32,
+        height: u32,
+        chans: u32,
+        cb: impl FnOnce(kanal::Receiver<(B, kanal::OneshotSender<B>)>) + Send + 'static,
+    ) -> Self {
+        let (req_send, req_recv) = kanal::bounded::<(B, kanal::OneshotSender<B>)>(4);
+
+        tokio::task::spawn_blocking(move || cb(req_recv));
 
         Self {
             req_send,

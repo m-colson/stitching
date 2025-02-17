@@ -1,14 +1,15 @@
-use std::{f32::consts::PI, ops::DerefMut, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, f32::consts::PI, ops::DerefMut, path::PathBuf, sync::Arc};
 
 use encase::ShaderType;
 use glam::Mat4;
 use smpgpu::{
     global as glob_gpu,
     model::{Model, ModelBuilder, VertPosNorm},
-    AutoVisBindable, Buffer, Context, MemMapper, Pass, RenderCheckpoint, StorageBuffer, Texture,
-    Uniform,
+    AsRenderItem, AsyncMemMapper, AutoVisBindable, Buffer, Context, CopyOp, MemMapper, Pass,
+    RenderCheckpoint, StorageBuffer, Texture, Uniform, VertexBuffer,
 };
-use zerocopy::FromZeros;
+use tokio::sync::Mutex;
+use zerocopy::{FromBytes, FromZeros};
 
 use crate::{
     buf::FrameSize,
@@ -19,24 +20,41 @@ use crate::{
 
 use super::ViewStyle;
 
+#[derive(Clone, Debug)]
+pub struct InverseView(pub Mat4);
+
 pub struct GpuProjector {
     pass_info: Uniform<PassInfo>,
-    pass_info_inp_sizes: glam::UVec3,
 
     inp_frames: Arc<Buffer>,
     inp_specs: StorageBuffer<InputSpec>,
+    inp_sizes: Vec<glam::UVec2>,
+    inp_starts: Vec<u32>,
 
     main_out: RenderOutput,
     depth_texture: Texture,
     back: Model<Vertex, u16>,
-    object_model: Option<Model<VertPosNorm, u16>>,
+    object_model: Option<Model<VertPosNorm, u32>>,
 
-    sub_outs: Vec<(RenderOutput, RenderCheckpoint)>,
+    sub_outs: Vec<SubOutput>,
     last_sub_views: Vec<Mat4>,
+    bounding_vertices: VertexBuffer<glam::Vec4>,
+    bounding_vertices_len: usize,
+    bounding_cp: RenderCheckpoint,
+}
+
+struct SubOutput {
+    pub rend: RenderOutput,
+    pub depth: Texture,
+    pub depth_staging: Buffer,
+    pub depth_data: Mutex<Box<[f32]>>,
+    pub cp: RenderCheckpoint,
 }
 
 #[derive(ShaderType, Clone, Copy, Debug, Default)]
 struct InputSpec {
+    resolution: glam::UVec2,
+    data_start: u32,
     /// Camera's position [x, y, z]
     pos: glam::Vec3,
     // Camera reverse mat
@@ -49,12 +67,14 @@ struct InputSpec {
     lens_type: u32,
 }
 
-impl From<ViewParams> for InputSpec {
+impl InputSpec {
     #[inline]
-    fn from(s: ViewParams) -> Self {
+    fn from_view(s: ViewParams, resolution: glam::UVec2, data_start: u32) -> Self {
         let rev_mat = glam::Mat3::from_euler(glam::EulerRot::ZXY, s.azimuth, s.pitch, s.roll);
 
         Self {
+            resolution,
+            data_start,
             pos: s.pos.into(),
             rev_mat,
             img_off: s.sensor.img_off.into(),
@@ -91,12 +111,16 @@ impl RenderOutput {
             staging,
         }
     }
+
+    pub fn prepare(&self) -> CopyOp<'_> {
+        self.texture.copy_to(&self.staging)
+    }
 }
 
 #[derive(ShaderType, Clone, Copy, Debug)]
 struct PassInfo {
-    inp_sizes: glam::UVec3,
     bound_radius: f32,
+    num_cameras: u32,
 }
 
 #[derive(ShaderType, Clone, Copy)]
@@ -114,30 +138,38 @@ impl Vertex {
 }
 
 pub struct GpuProjectorBuilder<'a> {
+    input_sizes: Vec<glam::UVec2>,
     out_size: (usize, usize),
-    input_size: (u32, u32, u32),
     num_subs: usize,
     bound_verts: Vec<Vertex>,
     bound_idxs: Vec<u16>,
     mask_paths: Vec<Option<PathBuf>>,
-    model_builder: Option<smpgpu::model::ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>>,
+    model_builder: Option<smpgpu::model::ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>>,
+    model_origin: glam::Vec3,
+    model_scale: glam::Vec3,
 }
 
 impl<'a> GpuProjectorBuilder<'a> {
     const fn new() -> Self {
         Self {
+            input_sizes: Vec::new(),
             out_size: (0, 0),
-            input_size: (0, 0, 0),
             num_subs: 0,
             bound_verts: Vec::new(),
             bound_idxs: Vec::new(),
             mask_paths: Vec::new(),
             model_builder: None,
+            model_origin: glam::vec3(0., 0., 0.),
+            model_scale: glam::vec3(1., 1., 1.),
         }
     }
 
-    pub const fn input_size(mut self, w: u32, h: u32, n: u32) -> Self {
-        self.input_size = (w, h, n);
+    pub fn input_sizes<T: Into<glam::UVec2>>(
+        mut self,
+        input_sizes: impl IntoIterator<Item = T>,
+    ) -> Self {
+        self.input_sizes
+            .extend(input_sizes.into_iter().map(|s| s.into()));
         self
     }
 
@@ -154,7 +186,7 @@ impl<'a> GpuProjectorBuilder<'a> {
     pub fn cylinder_bound(mut self) -> Self {
         const SLICES: u16 = 20;
         const RADIUS: f32 = 70.;
-        const HEIGHT: f32 = 50.;
+        const HEIGHT: f32 = 80.;
 
         let mut verts = Vec::new();
         verts.push(Vertex::new(0., 0., 0.));
@@ -191,8 +223,8 @@ impl<'a> GpuProjectorBuilder<'a> {
     pub fn model(
         mut self,
         f: impl FnOnce(
-            ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>,
-        ) -> ModelBuilder<'a, smpgpu::model::VertPosNorm, u16>,
+            ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>,
+        ) -> ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>,
     ) -> Self {
         self.model_builder = Some(f(self
             .model_builder
@@ -201,19 +233,31 @@ impl<'a> GpuProjectorBuilder<'a> {
         self
     }
 
+    pub fn model_origin(mut self, origin: [f32; 3]) -> Self {
+        self.model_origin = origin.into();
+        self
+    }
+
+    pub fn model_scale(mut self, scale: [f32; 3]) -> Self {
+        self.model_scale = scale.into();
+        self
+    }
+
     pub fn build(self) -> GpuProjector {
         let pass_info = glob_gpu::uniform().label("pass_info").writable().build();
 
+        let inp_ranges = self.calc_input_ranges();
+
         let inp_frames = glob_gpu::buffer()
             .label("inp_frames")
-            .size((self.input_size.0 * self.input_size.1 * self.input_size.2 * 4) as _)
+            .size((inp_ranges.last().unwrap().1 * 4) as _)
             .storage()
             .writable()
             .build();
 
         let inp_specs = glob_gpu::storage_buffer()
             .label("inp_specs")
-            .len(self.input_size.2.into())
+            .len(self.input_sizes.len() as _)
             .writable()
             .build();
 
@@ -240,15 +284,22 @@ impl<'a> GpuProjectorBuilder<'a> {
                 .shader(render_shader.clone())
                 .enable_depth()
                 .vert_buffer_of::<Vertex>(&smpgpu::vertex_attr_array![0 => Float32x4])
-                .frag_target(main_out.texture.format())
+                .frag_target(main_out.texture.frag_target_format())
                 .build()
             });
 
         let sub_outs = (0..self.num_subs)
             .map(|_| {
-                let out = RenderOutput::new(640, 640);
+                let rend = RenderOutput::new(640, 640);
+                let depth = glob_gpu::texture()
+                    .size(640, 640)
+                    .depth()
+                    .readable()
+                    .build();
+                let depth_staging = depth.new_staging_global();
+                let depth_data = Mutex::new(<[f32]>::new_box_zeroed_with_elems(640 * 640).unwrap());
                 let cp = glob_gpu::checkpoint()
-                    .group(back.view.in_vertex() & out.cam.in_vertex())
+                    .group(back.view.in_vertex() & rend.cam.in_vertex())
                     .group(
                         pass_info.in_frag()
                             & inp_frames.in_frag()
@@ -257,9 +308,16 @@ impl<'a> GpuProjectorBuilder<'a> {
                     )
                     .shader(render_shader.clone())
                     .vert_buffer_of::<Vertex>(&smpgpu::vertex_attr_array![0 => Float32x4])
-                    .frag_target(out.texture.format())
+                    .frag_target(rend.texture.format())
+                    .enable_depth()
                     .build();
-                (out, cp)
+                SubOutput {
+                    rend,
+                    depth,
+                    depth_staging,
+                    depth_data,
+                    cp,
+                }
             })
             .collect();
 
@@ -274,40 +332,76 @@ impl<'a> GpuProjectorBuilder<'a> {
                     .frag_target(main_out.texture.format())
                     .build()
             })
-            .with_view(Mat4::from_translation(glam::vec3(0., 0., 6.68)))
+            .with_view(Mat4::from_scale_rotation_translation(
+                self.model_scale,
+                glam::Quat::IDENTITY,
+                self.model_origin,
+            ))
         });
 
         let depth_texture = glob_gpu::texture()
             .label("depth_texture")
             .size(self.out_size.0, self.out_size.1)
-            .render_target()
             .depth()
+            .build();
+
+        let bound_vertices = glob_gpu::vertex_buffer().len(4096).writable().build();
+        let bound_cp = glob_gpu::checkpoint()
+            .group(back.view.in_vertex() & main_out.cam.in_vertex())
+            .shader(smpgpu::include_shader!("shaders/bounds.wgsl"))
+            .enable_depth()
+            .vert_buffer_of::<glam::Vec4>(&smpgpu::vertex_attr_array![0 => Float32x4])
+            .frag_target(main_out.texture.frag_target_format().use_transparency())
             .build();
 
         GpuProjector {
             pass_info,
-            pass_info_inp_sizes: self.input_size.into(),
             inp_frames: Arc::new(inp_frames),
             inp_specs,
+            inp_sizes: self.input_sizes.clone(),
+            inp_starts: inp_ranges.into_iter().map(|v| v.0).collect(),
             main_out,
             depth_texture,
             back,
             object_model,
             sub_outs,
             last_sub_views: Vec::new(),
+            bounding_vertices: bound_vertices,
+            bounding_vertices_len: 0,
+            bounding_cp: bound_cp,
         }
     }
 
+    fn calc_input_ranges(&self) -> Vec<(u32, u32)> {
+        self.input_sizes
+            .iter()
+            .scan(0, |o, v| {
+                let out = *o;
+                *o += v.x * v.y;
+                Some((out, *o))
+            })
+            .collect()
+    }
+
     fn generate_masks(&self) -> Box<[u32]> {
-        let img_size = self.input_size.0 * self.input_size.1;
+        let input_ranges = self.calc_input_ranges();
 
         let mut out =
-            <[u32]>::new_box_zeroed_with_elems((img_size * self.input_size.2) as _).unwrap();
+            <[u32]>::new_box_zeroed_with_elems(input_ranges.last().unwrap().1 as _).unwrap();
+
+        if self.mask_paths.is_empty() {
+            out.fill(!0);
+            return out;
+        }
+
+        tracing::info!("ranges {input_ranges:?}");
 
         self.mask_paths
             .iter()
-            .zip(out.chunks_mut(img_size as _))
-            .for_each(|(p, view)| {
+            .zip(input_ranges)
+            .for_each(|(p, (start, end))| {
+                let view = &mut out[start as usize..end as usize];
+
                 let opt_data = p.as_deref().and_then(|p| {
                     image::open(p)
                         .inspect_err(|err| tracing::error!("failed to load mask {:?}: {err}", p))
@@ -337,8 +431,8 @@ impl GpuProjector {
     #[inline]
     pub fn update_proj_view(&self, style: ViewStyle) {
         self.pass_info.set_global(&PassInfo {
-            inp_sizes: self.pass_info_inp_sizes,
             bound_radius: 0.0,
+            num_cameras: self.inp_sizes.len() as _,
         });
 
         let out_size = self.main_out.texture.size();
@@ -398,7 +492,7 @@ impl GpuProjector {
         const HEIGHT: f32 = 10.;
 
         let mut out = Vec::new();
-        for (i, (o, _)) in self.sub_outs.iter().enumerate() {
+        for (i, sub) in self.sub_outs.iter().enumerate() {
             let rot = rm * (i as f32);
 
             let view = proj
@@ -408,11 +502,18 @@ impl GpuProjector {
                     glam::Vec3::Z,
                 );
 
-            o.cam.set_global(&view);
+            sub.rend.cam.set_global(&view);
 
-            out.push(view.inverse());
+            let inv = view.inverse();
+
+            out.push(inv);
         }
         self.last_sub_views = out;
+    }
+
+    pub fn update_bounding_verts(&mut self, vs: &[glam::Vec4]) {
+        self.bounding_vertices.set_global(vs);
+        self.bounding_vertices_len = vs.len();
     }
 
     #[inline]
@@ -420,7 +521,9 @@ impl GpuProjector {
         self.inp_specs.set_global(
             &cams
                 .iter()
-                .map(|c: &Camera<T>| c.view.into())
+                .zip(&self.inp_sizes)
+                .zip(&self.inp_starts)
+                .map(|((c, res), start)| InputSpec::from_view(c.view, *res, *start))
                 .collect::<Vec<_>>(),
         );
     }
@@ -432,24 +535,36 @@ impl GpuProjector {
                 Pass::render()
                     | &self.depth_texture.depth_attach()
                     | &self.main_out.texture.color_attach()
-                    | self.back.to_item()
-                    | self.object_model.as_ref().map(Model::to_item),
+                    | self.back.as_item()
+                    | self.object_model.as_ref().map(Model::as_item)
+                    | self
+                        .bounding_cp
+                        .vert_buf(&self.bounding_vertices)
+                        .vert_range(0..(self.bounding_vertices_len as u32)),
             )
-            .then(self.main_out.texture.copy_to(&self.main_out.staging))
+            .then(self.main_out.prepare())
             .submit();
 
         glob_gpu::force_wake();
 
-        for (o, cp) in &self.sub_outs {
+        for SubOutput {
+            rend,
+            depth,
+            depth_staging,
+            depth_data: _,
+            cp,
+        } in &self.sub_outs
+        {
             glob_gpu::command()
                 .then(
                     Pass::render()
-                        | &o.texture.color_attach()
-                        | cp.to_item()
-                            .vert_buf(&self.back.verts)
+                        | &depth.depth_attach()
+                        | &rend.texture.color_attach()
+                        | cp.vert_buf(&self.back.verts)
                             .index_buf(&self.back.idx, 0..self.back.idx_len),
                 )
-                .then(o.texture.copy_to(&o.staging))
+                .then(depth.copy_to(&depth_staging))
+                .then(rend.prepare())
                 .submit();
         }
 
@@ -464,22 +579,32 @@ impl GpuProjector {
     }
 
     #[inline]
-    pub async fn wait_for_subs(&self, f: impl FnOnce(usize, &[u8]) + Send + Clone) {
-        let cpy_fut = self
-            .sub_outs
-            .iter()
-            .enumerate()
-            .fold(MemMapper::new(), |mapper, (i, (o, _))| {
-                let f = f.clone();
-                mapper.read_from(&o.staging, move |buf| {
-                    // let img =
-                    //     image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(640, 640, buf).unwrap();
-                    tracing::info!("saving view{i}");
-                    f(i, &buf)
-                    // img.save(format!("view{i}.png")).unwrap();
-                })
+    pub async fn wait_for_subs(
+        &self,
+        f: impl FnOnce(usize, InverseView, &[u8], DepthData<'_>) + Send + Clone,
+    ) {
+        let cpy_fut = AsyncMemMapper::fold_from(self.sub_outs.iter().enumerate(), |m, (i, sub)| {
+            let f = f.clone();
+
+            let (depth_done_send, depth_done) = kanal::oneshot_async();
+            m.read_from(&sub.depth_staging, move |buf| async move {
+                sub.depth_data
+                    .lock()
+                    .await
+                    .copy_from_slice(<_>::ref_from_bytes(&*buf).expect("copy bug"));
+                _ = depth_done_send.send(()).await;
             })
-            .run_all();
+            .read_from(&sub.rend.staging, move |buf| async move {
+                _ = depth_done.recv().await;
+                f(
+                    i,
+                    InverseView(self.last_sub_views[i]),
+                    &buf,
+                    DepthData(Cow::Borrowed(&*sub.depth_data.lock().await), 640, 640),
+                )
+            })
+        })
+        .run();
 
         glob_gpu::force_wake();
         cpy_fut.await;
@@ -530,5 +655,29 @@ impl OwnedWriteBuffer for GpuDirectBufferWrite {
             Ok(size) => Some(self.ctx.write_with(&self.buf, self.offset, size)),
             Err(_) => None,
         }
+    }
+}
+
+pub struct DepthData<'a>(Cow<'a, [f32]>, u32, u32);
+
+impl DepthData<'_> {
+    #[inline]
+    pub fn new_zeroed(width: usize, height: usize) -> Self {
+        Self(vec![0.0; width * height].into(), width as _, height as _)
+    }
+
+    #[inline]
+    pub fn copy_from(&mut self, src: &DepthData<'_>) {
+        self.0.to_mut().copy_from_slice(&src.0);
+    }
+
+    #[inline]
+    pub fn at(&self, x: u32, y: u32) -> f32 {
+        self.0[(x.min(self.1 - 1) + y.min(self.2 - 1) * self.1) as usize]
+    }
+
+    #[inline]
+    pub fn to_ref(&self) -> DepthData<'_> {
+        DepthData(Cow::Borrowed(&self.0), self.1, self.2)
     }
 }

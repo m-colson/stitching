@@ -1,25 +1,34 @@
-use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::util::conv_deg_rad;
 
 #[cfg(feature = "gpu")]
 mod render_gpu;
 #[cfg(feature = "gpu")]
-pub use render_gpu::{GpuDirectBufferWrite, GpuProjector};
+pub use render_gpu::{DepthData, GpuDirectBufferWrite, GpuProjector, InverseView};
 
 use crate::camera;
-#[cfg(feature = "live")]
-use crate::camera::live;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config<C> {
+    #[serde(default)]
     pub style: ProjectionStyle,
     pub view: ViewStyle,
+    pub model: Option<ModelConfig>,
     pub cameras: Vec<camera::Config<C>>,
 }
 
-#[cfg(feature = "live")]
-impl Config<live::Config> {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelConfig {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub origin: [f32; 3],
+    pub scale: Option<[f32; 3]>,
+}
+
+impl<C: DeserializeOwned> Config<C> {
     /// # Errors
     /// path can't be read or decoded
     #[cfg(feature = "toml-cfg")]
@@ -32,10 +41,11 @@ impl Config<live::Config> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectionStyle {
     RawCamera(u8),
+    #[default]
     Flat,
 }
 

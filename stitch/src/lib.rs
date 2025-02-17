@@ -8,10 +8,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(thiserror::Error)]
 pub enum Error {
-    #[error("io error: {0}")]
+    #[error("io error {0:?}")]
     IO(#[from] std::io::Error),
 
-    #[error("io error {0} while {1}")]
+    #[error("io error {0:?} while {1}")]
     IOWhen(std::io::Error, String),
 
     #[error("image error: {0}")]
@@ -33,9 +33,9 @@ pub enum Error {
     #[error("decode error: {0}")]
     DecodeError(#[from] toml::de::Error),
 
-    // #[cfg(feature = "live")]
-    // #[error("live err: {0}")]
-    // LiveErr(#[from] nokhwa::NokhwaError),
+    #[error(transparent)]
+    ArgusError(#[from] argus::Error),
+
     #[cfg(feature = "gpu")]
     #[error("gpu error: {0}")]
     GpuError(#[from] smpgpu::Error),

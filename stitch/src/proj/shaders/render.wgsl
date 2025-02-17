@@ -1,5 +1,3 @@
-const PI: f32 = 3.141592653589793;
-
 @group(0)
 @binding(0)
 var<uniform> mview: mat4x4<f32>;
@@ -13,11 +11,9 @@ var<uniform> cview: mat4x4<f32>;
 var<uniform> pass_info: PassInfo;
 
 struct PassInfo {
-    inp_sizes: vec3<u32>,
     bound_radius: f32,
+    num_cameras: u32,
 }
-
-
 
 @group(1)
 @binding(1)
@@ -32,6 +28,8 @@ var<storage, read> inp_specs: array<InputSpec>;
 var<storage, read> inp_masks: array<u32>;
 
 struct InputSpec {
+    res: vec2<u32>,
+    data_start: u32,
     pos: vec3<f32>,
     rev_mat: mat3x3<f32>,
     img_off: vec2<f32>,
@@ -60,19 +58,19 @@ fn fs_proj(vert: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 fn back_proj(bound: vec3<f32>) -> u32 {
-    var opts: array<vec2<f32>, 4>;
+    var opts: array<vec3<f32>, 4>;
     // First, precompute the optical space coords for the bound coord
-    for (var n = 0u; n < pass_info.inp_sizes.z; n += 1u) {
+    for (var n = 0u; n < pass_info.num_cameras; n += 1u) {
         opts[n] = opt_from_world(inp_specs[n], bound);
     }
 
     /// Next, loop through them and find the smallest optical angle
     var min_opt: f32 = 0.0;
-    for (var iters = 0u; iters < pass_info.inp_sizes.z; iters += 1u) {
+    for (var iters = 0u; iters < pass_info.num_cameras; iters += 1u) {
         var best_index = 0u;
         var best = opts[0];
-        for (var n = 1u; n < pass_info.inp_sizes.z; n += 1u) {
-            if opts[n].x < best.x && opts[n].x > min_opt {
+        for (var n = 1u; n < pass_info.num_cameras; n += 1u) {
+            if opts[n].z < best.z && opts[n].z > min_opt {
                 best = opts[n];
                 best_index = n;
             }
@@ -86,57 +84,57 @@ fn back_proj(bound: vec3<f32>) -> u32 {
 
         // Otherwise, repeat the loop again but skip any pixel with an optical
         // angle smaller than this one
-        min_opt = best.x;
+        min_opt = best.z;
     }
 
     return 0u;
 }
 
-fn opt_input_pixel(n: u32, os: vec2<f32>) -> u32 {
-    let inpSize = pass_info.inp_sizes.xy;
+fn opt_input_pixel(n: u32, os: vec3<f32>) -> u32 {
     let spec = inp_specs[n];
+    let inpSize = spec.res;
 
     let imgPos = coord_from_img(img_from_opt(spec, os), inpSize) + spec.img_off;
     if any(imgPos < vec2f(0.0, 0.0)) || any(imgPos >= vec2f(inpSize)) {
         return 0u;
     }
 
-    return input_pixel(n, vec2u(imgPos));
+    return input_pixel(spec.data_start, inpSize, vec2u(imgPos));
 }
 
-fn input_pixel(n: u32, p: vec2<u32>) -> u32 {
-    let off = p.x + (p.y + n * pass_info.inp_sizes.y) * pass_info.inp_sizes.x;
+fn input_pixel(base: u32, res: vec2<u32>, p: vec2<u32>) -> u32 {
+    let off = p.x + (p.y) * res.x + base;
     return min(inp_masks[off], inp_frames[off]);
 }
 
 // Spaces:
 // world -> (x, y, z)
-// optical -> (opt_ang, rot_ang)
+// optical -> (opt_rel_x, opt_rel_y, opt_ang)
 // image -> (ux, uy) on unit circle spanning diagonal
 
-fn opt_from_world(s: InputSpec, rev_pos: vec3<f32>) -> vec2<f32> {
+fn opt_from_world(s: InputSpec, rev_pos: vec3<f32>) -> vec3<f32> {
     let rev_dir = normalize(rev_pos - s.pos);
     let ds = s.rev_mat * rev_dir;
 
-    let rot_ang = sign(ds.z) * acos(ds.x / length(ds.xz));
-    return vec2(acos(ds.y), rot_ang);
+    let opt_rel = normalize(ds.xz);
+    return vec3(opt_rel, acos(ds.y));
 }
 
-fn img_from_opt(s: InputSpec, angs: vec2<f32>) -> vec2<f32> {
+fn img_from_opt(s: InputSpec, angs: vec3<f32>) -> vec2<f32> {
     var r: f32 = 0.0;
     switch s.lens_type {
         case 0u, default: {
-            r = s.foc_dist * tan(angs.x);
+            r = s.foc_dist * tan(angs.z);
         }
         case 1u: {
-            r = s.foc_dist * angs.x;
+            r = s.foc_dist * angs.z;
         }
         case 2u: {
-            r = 2.0 * s.foc_dist * sin(angs.x / 2.0); 
+            r = 2.0 * s.foc_dist * sin(angs.z / 2.0); 
         }
     }
 
-    return vec2(r * cos(angs.y), r * sin(angs.y));
+    return r * angs.xy;
 }
 
 fn coord_from_img(rp: vec2<f32>, size: vec2<u32>) -> vec2<f32> {
