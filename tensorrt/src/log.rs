@@ -1,6 +1,6 @@
-use std::{ffi::CStr, sync::Mutex};
+use std::ffi::CStr;
 
-use tensorrt_sys::DestructorVEntry;
+use cpp_interop::DestructorVEntry;
 
 #[cfg(feature = "tracing")]
 pub static DEFAULT_LOGGER: &Logger = &TRACING_LOGGER;
@@ -45,7 +45,7 @@ pub struct Logger {
 enum LoggerCb {
     Static(&'static (dyn Fn(Severity, &str) + Sync)),
     #[allow(clippy::type_complexity)]
-    Owned(Box<dyn Fn(Severity, &str) + Send + 'static>),
+    Owned(Box<dyn Fn(Severity, &str) + Send + Sync + 'static>),
 }
 
 impl LoggerCb {
@@ -84,7 +84,7 @@ impl Logger {
     }
 
     #[inline]
-    pub fn new_owned(cb: impl Fn(Severity, &str) + Send + 'static) -> Self {
+    pub fn new_owned(cb: impl Fn(Severity, &str) + Send + Sync + 'static) -> Self {
         Self::new_with_cb(LoggerCb::Owned(Box::new(cb)))
     }
 

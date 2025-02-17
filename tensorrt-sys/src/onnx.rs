@@ -1,7 +1,9 @@
 use std::ffi::{c_char, c_int};
 
+use cpp_interop::DestructorVEntry;
+
 pub use crate::nvonnxparser::*;
-use crate::{root::SubGraphCollection_t, DestructorVEntry, ITensor};
+use crate::{root::SubGraphCollection_t, ITensor};
 
 pub struct IParserVTable {
     pub parse: unsafe extern "C" fn(

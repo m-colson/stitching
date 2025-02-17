@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+cpp-interop = { version = "0.1.0", path = "../cpp-interop" }
 
 [build-dependencies]
-bindgen = "0.71.1"
-cmake = "0.1.52"
+bindgen.workspace = true
