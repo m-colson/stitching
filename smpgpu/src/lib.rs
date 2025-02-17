@@ -15,12 +15,12 @@ mod typed_buffer;
 pub use bind::{AsBinding, AutoVisBindable, Bindings, VisBindable};
 pub use buffer::{Buffer, BufferBuilder};
 pub use cmd::{
-    Checkpoint, ColorAttachment, ComputeCheckpoint, ComputeItem, DepthAttachment, Pass,
-    RenderCheckpoint, RenderItem,
+    AsRenderItem, Checkpoint, ColorAttachment, ComputeCheckpoint, ComputeItem, CopyOp,
+    DepthAttachment, FragTarget, Pass, RenderCheckpoint, RenderItem,
 };
 pub use ctx::Context;
 pub mod global;
-pub use mem::MemMapper;
+pub use mem::{AsyncMemMapper, MemMapper};
 pub mod model;
 pub use sampler::Sampler;
 pub use shader::{RenderShader, Shader};

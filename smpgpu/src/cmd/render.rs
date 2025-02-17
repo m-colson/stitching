@@ -12,9 +12,9 @@ use super::{Checkpoint, CheckpointBuilder, CheckpointItem, TypeOp};
 
 pub type RenderCheckpoint = Checkpoint<wgpu::RenderPipeline>;
 
-impl RenderCheckpoint {
+impl AsRenderItem for RenderCheckpoint {
     #[inline]
-    pub fn to_item(&self) -> RenderItem<'_> {
+    fn as_item(&self) -> RenderItem<'_> {
         RenderItem {
             cp: self,
             vert_bufs: Vec::new(),
@@ -37,6 +37,8 @@ pub struct RenderCheckpointItem<'a> {
 impl<'a> CheckpointItem for RenderCheckpointItem<'a> {
     type ShaderType = CompiledRenderShader<'a>;
     type Pipeline = wgpu::RenderPipeline;
+
+    #[inline]
     fn from_shader(shader: Self::ShaderType) -> Self {
         Self {
             shader,
@@ -93,21 +95,25 @@ impl<'a> CheckpointItem for RenderCheckpointItem<'a> {
 }
 
 impl<'a> CheckpointBuilder<'a, RenderCheckpointItem<'a>> {
+    #[inline]
     pub fn lh_coords(mut self) -> Self {
         self.data.cw_space = true;
         self
     }
 
+    #[inline]
     pub fn cull_backface(mut self) -> Self {
         self.data.cull = Some(wgpu::Face::Back);
         self
     }
 
+    #[inline]
     pub fn enable_depth(mut self) -> Self {
         self.data.enable_depth = true;
         self
     }
 
+    #[inline]
     pub fn vert_buffer_of<T: ShaderSize>(
         mut self,
         attributes: &'a [wgpu::VertexAttribute],
@@ -120,8 +126,31 @@ impl<'a> CheckpointBuilder<'a, RenderCheckpointItem<'a>> {
         self
     }
 
+    #[inline]
     pub fn frag_target(mut self, target: impl Into<wgpu::ColorTargetState>) -> Self {
         self.data.frag_targets.push(Some(target.into()));
+        self
+    }
+}
+
+pub struct FragTarget(wgpu::ColorTargetState);
+
+impl From<FragTarget> for wgpu::ColorTargetState {
+    #[inline]
+    fn from(value: FragTarget) -> Self {
+        value.0
+    }
+}
+
+impl FragTarget {
+    #[inline]
+    pub fn new(f: wgpu::TextureFormat) -> Self {
+        Self(f.into())
+    }
+
+    #[inline]
+    pub fn use_transparency(mut self) -> Self {
+        self.0.blend = Some(wgpu::BlendState::ALPHA_BLENDING);
         self
     }
 }
@@ -149,6 +178,7 @@ impl RenderPass<'_> {
 impl<'a, T: TypeOp<RenderPass<'a>>> BitOr<T> for RenderPass<'a> {
     type Output = RenderPass<'a>;
 
+    #[inline]
     fn bitor(self, rhs: T) -> Self::Output {
         self.with(rhs)
     }
@@ -321,5 +351,42 @@ impl<'a> RenderItem<'a> {
             pass.set_index_buffer(b.slice(..), *f);
             pass.draw_indexed(indices.clone(), 0, self.insts_range.clone());
         }
+    }
+}
+
+pub trait AsRenderItem {
+    fn as_item(&self) -> RenderItem<'_>;
+
+    #[inline]
+    fn vert_buf<'a, T>(&'a self, buf: &'a VertexBuffer<T>) -> RenderItem<'a> {
+        self.as_item().vert_buf(buf)
+    }
+
+    #[inline]
+    fn raw_vert_buf<'a>(&'a self, buf: &'a wgpu::Buffer) -> RenderItem<'a> {
+        self.as_item().raw_vert_buf(buf)
+    }
+
+    #[inline]
+    fn vert_range(&self, range: Range<u32>) -> RenderItem<'_> {
+        self.as_item().vert_range(range)
+    }
+
+    #[inline]
+    fn index_buf<'a, T: IndexBufferFormat>(
+        &'a self,
+        buf: &'a IndexBuffer<T>,
+        range: Range<u32>,
+    ) -> RenderItem<'a> {
+        self.as_item().index_buf::<T>(buf, range)
+    }
+
+    #[inline]
+    fn raw_index_buf<'a, T: IndexBufferFormat>(
+        &'a self,
+        buf: &'a wgpu::Buffer,
+        range: Range<u32>,
+    ) -> RenderItem<'a> {
+        self.as_item().raw_index_buf::<T>(buf, range)
     }
 }

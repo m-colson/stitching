@@ -2,9 +2,9 @@ use crate::{
     bind::{AsBinding, BindResource},
     cmd::{
         render::{ColorAttachment, DepthAttachment},
-        CopyOp, TypeOp,
+        CopyOp,
     },
-    Buffer,
+    Buffer, FragTarget,
 };
 
 pub struct Texture {
@@ -23,6 +23,12 @@ impl Texture {
         self.inner.format()
     }
 
+    #[must_use]
+    #[inline]
+    pub fn frag_target_format(&self) -> FragTarget {
+        FragTarget::new(self.inner.format())
+    }
+
     #[inline]
     pub(crate) fn texture_view_dimension(&self) -> wgpu::TextureViewDimension {
         if self.size().depth_or_array_layers == 1 {
@@ -38,6 +44,7 @@ impl Texture {
             label: None,
             format: Some(self.format()),
             dimension: Some(self.texture_view_dimension()),
+            usage: None,
             aspect: wgpu::TextureAspect::All,
             base_mip_level: 0,
             mip_level_count: None,
@@ -50,7 +57,7 @@ impl Texture {
     pub fn write_to_layer(&self, queue: &wgpu::Queue, data: &[u8], layer: u32) {
         let size = self.size();
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: self,
                 mip_level: 0,
                 origin: wgpu::Origin3d {
@@ -61,7 +68,7 @@ impl Texture {
                 aspect: wgpu::TextureAspect::All,
             },
             data,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(size.width * 4),
                 rows_per_image: Some(size.height),
@@ -86,7 +93,7 @@ impl Texture {
 
     #[must_use]
     #[inline]
-    pub fn copy_to<'a>(&'a self, buf: &'a Buffer) -> impl TypeOp<wgpu::CommandEncoder> + 'a {
+    pub fn copy_to<'a>(&'a self, buf: &'a Buffer) -> CopyOp<'a> {
         let size = self.size();
         CopyOp::TextBuf(
             self,
@@ -170,9 +177,9 @@ impl<'a> TextureBuilder<'a> {
 
     #[must_use]
     #[inline]
-    pub const fn depth(mut self) -> Self {
+    pub fn depth(mut self) -> Self {
         self.format = wgpu::TextureFormat::Depth32Float;
-        self
+        self.render_target()
     }
 
     #[must_use]

@@ -3,7 +3,7 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     bind::{AsBinding, BindResource},
-    cmd::{CopyOp, TypeOp},
+    cmd::CopyOp,
 };
 
 /// Wrapper type over a [`wgpu::Buffer`]
@@ -20,7 +20,7 @@ impl Buffer {
 
     /// Create a new operation that will copy the data of `self` to `buf`.
     #[inline]
-    pub fn copy_to_buf_op<'a>(&'a self, buf: &'a Self) -> impl TypeOp<wgpu::CommandEncoder> + 'a {
+    pub fn copy_to_buf_op<'a>(&'a self, buf: &'a Self) -> CopyOp<'a> {
         CopyOp::BufBuf(self, 0, buf, 0, self.size())
     }
 }
@@ -113,7 +113,8 @@ impl<'a> BufferBuilder<'a> {
         if (self.usage.contains(wgpu::BufferUsages::MAP_READ)
             || self.usage.contains(wgpu::BufferUsages::MAP_WRITE))
             && (self.usage.contains(wgpu::BufferUsages::UNIFORM)
-                || self.usage.contains(wgpu::BufferUsages::STORAGE))
+                || self.usage.contains(wgpu::BufferUsages::STORAGE)
+                || self.usage.contains(wgpu::BufferUsages::VERTEX))
         {
             self.usage
                 .remove(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::MAP_WRITE);

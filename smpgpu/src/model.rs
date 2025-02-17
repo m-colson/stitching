@@ -5,7 +5,8 @@ use encase::{ShaderSize, ShaderType};
 use crate::{
     cmd::CheckpointBuilder,
     typed_buffer::{IndexBufferBuilder, IndexBufferFormat, UniformBuilder, VertexBufferBuilder},
-    AutoVisBindable, IndexBuffer, RenderCheckpoint, RenderItem, Uniform, VertexBuffer,
+    AsRenderItem, AutoVisBindable, IndexBuffer, RenderCheckpoint, RenderItem, Uniform,
+    VertexBuffer,
 };
 
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
@@ -44,10 +45,11 @@ impl<V: ShaderSize, I: IndexBufferFormat> Model<V, I> {
         self.view.set_global(&m);
         self
     }
+}
 
-    pub fn to_item(&self) -> RenderItem {
+impl<V: ShaderSize, I: IndexBufferFormat> AsRenderItem for Model<V, I> {
+    fn as_item(&self) -> RenderItem<'_> {
         self.cp
-            .to_item()
             .vert_buf(&self.verts)
             .index_buf(&self.idx, 0..self.idx_len)
     }
@@ -108,7 +110,11 @@ impl<'a, V: ShaderSize + Clone, I: IndexBufferFormat> ModelBuilder<'a, V, I> {
     }
 }
 
-impl ModelBuilder<'_, VertPosNorm, u16> {
+impl<I> ModelBuilder<'_, VertPosNorm, I>
+where
+    I: crate::typed_buffer::IndexBufferFormat,
+    obj::Vertex: obj::FromRawVertex<I>,
+{
     #[cfg(feature = "obj-file")]
     pub fn obj_file_reader(mut self, r: impl std::io::BufRead) -> Self {
         let obj = obj::load_obj(r).unwrap();

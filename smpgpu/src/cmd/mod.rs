@@ -6,7 +6,10 @@ pub(crate) mod compute;
 pub use compute::{ComputeCheckpoint, ComputeItem, ComputePass};
 
 pub(crate) mod render;
-pub use render::{ColorAttachment, DepthAttachment, RenderCheckpoint, RenderItem, RenderPass};
+pub use render::{
+    AsRenderItem, ColorAttachment, DepthAttachment, FragTarget, RenderCheckpoint, RenderItem,
+    RenderPass,
+};
 
 /// Contains the information necessary to build a specific command without
 /// the need for lifetimes.
@@ -151,15 +154,15 @@ impl TypeOp<wgpu::CommandEncoder> for CopyOp<'_> {
     fn type_op(self, enc: &mut wgpu::CommandEncoder) {
         match self {
             CopyOp::TextBuf(texture, origin, aspect, buffer, ext) => enc.copy_texture_to_buffer(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture,
                     mip_level: 0,
                     origin,
                     aspect,
                 },
-                wgpu::ImageCopyBuffer {
+                wgpu::TexelCopyBufferInfo {
                     buffer,
-                    layout: wgpu::ImageDataLayout {
+                    layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(ext.width * 4),
                         rows_per_image: Some(ext.height),
@@ -168,15 +171,15 @@ impl TypeOp<wgpu::CommandEncoder> for CopyOp<'_> {
                 ext,
             ),
             CopyOp::BufText(buffer, texture, origin, aspect, ext) => enc.copy_buffer_to_texture(
-                wgpu::ImageCopyBuffer {
+                wgpu::TexelCopyBufferInfo {
                     buffer,
-                    layout: wgpu::ImageDataLayout {
+                    layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
                         bytes_per_row: Some(ext.width * 4),
                         rows_per_image: Some(ext.height * 4),
                     },
                 },
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture,
                     mip_level: 0,
                     origin,
