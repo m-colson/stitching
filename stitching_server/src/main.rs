@@ -41,7 +41,7 @@ impl Args {
 
                 let monitoring_handle = tokio::spawn(async {
                     loop {
-                        tokio::time::sleep(Duration::from_secs(1)).await;
+                        tokio::time::sleep(Duration::from_secs(3)).await;
                         Metrics::with(|m| tracing::info!("timing {}", m));
                         Metrics::reset();
                     }

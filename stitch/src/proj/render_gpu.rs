@@ -38,7 +38,7 @@ pub struct GpuProjector {
 
     sub_outs: Vec<SubOutput>,
     last_sub_views: Vec<Mat4>,
-    bounding_vertices: VertexBuffer<glam::Vec4>,
+    bounding_vertices: VertexBuffer<TexturedVertex>,
     bounding_vertices_len: usize,
     bounding_cp: RenderCheckpoint,
 }
@@ -133,6 +133,30 @@ impl Vertex {
     pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self {
             pos: glam::vec4(x, y, z, 1.),
+        }
+    }
+}
+
+#[derive(ShaderType, Clone, Copy, Debug)]
+pub struct TexturedVertex {
+    pub pos: glam::Vec4,
+    pub text_coord: glam::Vec2,
+}
+
+impl TexturedVertex {
+    #[inline]
+    pub const fn new(x: f32, y: f32, z: f32, tx: f32, ty: f32) -> Self {
+        Self {
+            pos: glam::vec4(x, y, z, 1.),
+            text_coord: glam::vec2(tx, ty),
+        }
+    }
+
+    #[inline]
+    pub const fn from_pos(pos: glam::Vec4, tx: f32, ty: f32) -> Self {
+        Self {
+            pos,
+            text_coord: glam::vec2(tx, ty),
         }
     }
 }
@@ -350,7 +374,9 @@ impl<'a> GpuProjectorBuilder<'a> {
             .group(back.view.in_vertex() & main_out.cam.in_vertex())
             .shader(smpgpu::include_shader!("shaders/bounds.wgsl"))
             .enable_depth()
-            .vert_buffer_of::<glam::Vec4>(&smpgpu::vertex_attr_array![0 => Float32x4])
+            .vert_buffer_of::<TexturedVertex>(
+                &smpgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2],
+            )
             .frag_target(main_out.texture.frag_target_format().use_transparency())
             .build();
 
@@ -511,7 +537,7 @@ impl GpuProjector {
         self.last_sub_views = out;
     }
 
-    pub fn update_bounding_verts(&mut self, vs: &[glam::Vec4]) {
+    pub fn update_bounding_verts(&mut self, vs: &[TexturedVertex]) {
         self.bounding_vertices.set_global(vs);
         self.bounding_vertices_len = vs.len();
     }

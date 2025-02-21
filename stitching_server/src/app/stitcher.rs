@@ -7,7 +7,7 @@ use stitch::{
     loader::{self, Loader, OwnedWriteBuffer},
     proj::{
         self, DepthData, GpuDirectBufferWrite, GpuProjector, InverseView, ProjectionStyle,
-        ViewStyle,
+        TexturedVertex, ViewStyle,
     },
     Result,
 };
@@ -18,7 +18,7 @@ use super::proto::VideoPacket;
 pub enum Update {
     ProjStyle(Box<dyn FnOnce(&mut ProjectionStyle) + Send>),
     ViewStyle(Box<dyn FnOnce(&mut ViewStyle) + Send>),
-    Bounds(Vec<glam::Vec4>),
+    Bounds(Vec<TexturedVertex>),
 }
 
 pub struct Sticher {
@@ -66,12 +66,12 @@ impl Sticher {
         tokio::spawn(async move {
             loop {
                 let (mut done_sends, done_recvs): (Vec<_>, Vec<_>) = (0..subs)
-                    .map(|_| kanal::oneshot::<Vec<glam::Vec4>>())
+                    .map(|_| kanal::oneshot::<Vec<TexturedVertex>>())
                     .map(|(s, r)| (Some(s), r))
                     .unzip();
                 req_inferer
                     .req_infer(move |n, view, bbs, depth| {
-                        let mut triangles = Vec::new();
+                        let mut vertices = Vec::new();
 
                         if let Some(InverseView(inv_mat)) = view {
                             for bb in bbs {
@@ -83,27 +83,30 @@ impl Sticher {
                                 let sbb = bb.rescale(640., 640., 2., 2.);
                                 let lt = inv_mat
                                     * glam::vec4(sbb.xmin() - 1., -(sbb.ymin() - 1.), lt_depth, 1.);
-                                let lt = lt / lt.w;
+                                let lt = TexturedVertex::from_pos(lt / lt.w, -1., -1.);
+
                                 let rt = inv_mat
                                     * glam::vec4(sbb.xmax() - 1., -(sbb.ymin() - 1.), rt_depth, 1.);
-                                let rt = rt / rt.w;
+                                let rt = TexturedVertex::from_pos(rt / rt.w, 1., -1.);
+
                                 let lb = inv_mat
                                     * glam::vec4(sbb.xmin() - 1., -(sbb.ymax() - 1.), lt_depth, 1.);
-                                let lb = lb / lb.w;
+                                let lb = TexturedVertex::from_pos(lb / lb.w, -1., 1.);
+
                                 let rb = inv_mat
                                     * glam::vec4(sbb.xmax() - 1., -(sbb.ymax() - 1.), rt_depth, 1.);
-                                let rb = rb / rb.w;
+                                let rb = TexturedVertex::from_pos(rb / rb.w, 1., 1.);
 
-                                triangles.extend([rt, lt, lb, lb, rb, rt]);
-                                tracing::info!("{n} {rt:?}: {bb}");
+                                vertices.extend([rt, lt, lb, lb, rb, rt]);
+                                // tracing::info!("{n} {rt:?}: {bb}");
                             }
                         }
 
-                        done_sends[n].take().unwrap().send(triangles).unwrap();
+                        done_sends[n].take().unwrap().send(vertices).unwrap();
                     })
                     .await;
 
-                let triangles = futures_util::future::join_all(
+                let vertices = futures_util::future::join_all(
                     done_recvs
                         .into_iter()
                         .map(|r| async { r.to_async().recv().await.ok() }),
@@ -115,7 +118,7 @@ impl Sticher {
                 .collect();
 
                 bound_update_send
-                    .send(Update::Bounds(triangles))
+                    .send(Update::Bounds(vertices))
                     .await
                     .unwrap();
             }

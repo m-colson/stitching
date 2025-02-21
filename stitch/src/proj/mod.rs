@@ -7,7 +7,7 @@ use crate::util::conv_deg_rad;
 #[cfg(feature = "gpu")]
 mod render_gpu;
 #[cfg(feature = "gpu")]
-pub use render_gpu::{DepthData, GpuDirectBufferWrite, GpuProjector, InverseView};
+pub use render_gpu::{DepthData, GpuDirectBufferWrite, GpuProjector, InverseView, TexturedVertex};
 
 use crate::camera;
 
