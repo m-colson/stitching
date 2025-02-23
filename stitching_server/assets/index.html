@@ -96,12 +96,12 @@
       }
 
       syncView() {
+        // this.drawDebugGrid()
         let scaling = Math.min(this.width / this.videoWidth, this.height / this.videoHeight);
         let outWidth = this.videoWidth * scaling;
         let outHeight = this.videoHeight * scaling;
         this.ctx.clearRect(0, 0, this.width, this.height);
         this.ctx.drawImage(this.videoBuf, (this.width - outWidth) / 2, (this.height - outHeight) / 2, outWidth, outHeight);
-        // drawDebugGrid()
       }
 
       drawDebugGrid() {
@@ -109,21 +109,21 @@
         const tile = 50.8;
         const width = 1280;
         const height = 720;
-        this.ctx.translate(width / 2, height / 2);
-        this.ctx.scale((height / 2) / rh, (height / 2) / rh);
+        this.videoCtx.translate(width / 2, height / 2);
+        this.videoCtx.scale((height / 2) / rh, (height / 2) / rh);
 
         for (let y = -2; y < 2; y++) {
           for (let x = -4; x < 4; x++) {
-            this.ctx.strokeRect(x * tile, y * tile, tile, tile);
+            this.videoCtx.strokeRect(x * tile, y * tile, tile, tile);
           }
         }
 
 
-        this.ctx.resetTransform()
+        this.videoCtx.resetTransform()
       }
     }
 
-    customElements.define("projection-view", ProjectionView, {extends: "canvas"});
+    customElements.define("projection-view", ProjectionView, { extends: "canvas" });
 
     window.addEventListener("resize", () => {
       document.querySelectorAll('[is="projection-view"]').forEach((e) => {
