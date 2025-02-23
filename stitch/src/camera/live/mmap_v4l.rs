@@ -96,15 +96,9 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
 
     let format = v4l::Format::new(frame_width, frame_height, frame_format);
 
-    // tracing::info!("setting camera {live_index} format to {format:?}");
     device
         .set_format(&format)
         .map_err(Error::io_ctx(format!("updating camera {index} format")))?;
-
-    // tracing::info!(
-    //     "camera {live_index} format is {:?}",
-    //     device.format().unwrap()
-    // );
 
     let mut stream = Stream::with_buffers(&device, v4l::buffer::Type::VideoCapture, 2)
         .map_err(Error::io_ctx(format!("create camera {index} stream")))?;

@@ -40,19 +40,39 @@ impl Context {
         offset: u64,
         size: NonZero<u64>,
     ) -> DirectWritableBufferView<'a> {
-        self.queue.write_buffer_with(buffer, offset, size).unwrap()
+        self.queue
+            .write_buffer_with(buffer, offset, size)
+            .expect("failed to create writable buffer view")
     }
 
     #[inline]
     pub fn write_uniform<T: ShaderType + WriteInto>(&self, buffer: &Buffer, v: &T) {
-        let mut data = self.write_with(buffer, 0, buffer.size().try_into().unwrap());
-        encase::UniformBuffer::new(data.as_mut()).write(v).unwrap();
+        let mut data = self.write_with(
+            buffer,
+            0,
+            buffer
+                .size()
+                .try_into()
+                .expect("attempted to write to uniform buffer with size 0"),
+        );
+        encase::UniformBuffer::new(data.as_mut())
+            .write(v)
+            .expect("failed to write to uniform buffer");
     }
 
     #[inline]
     pub fn write_storage<T: ShaderType + WriteInto + ?Sized>(&self, buffer: &Buffer, v: &T) {
-        let mut data = self.write_with(buffer, 0, buffer.size().try_into().unwrap());
-        encase::StorageBuffer::new(data.as_mut()).write(v).unwrap();
+        let mut data = self.write_with(
+            buffer,
+            0,
+            buffer
+                .size()
+                .try_into()
+                .expect("attempted to write to storage buffer with size 0"),
+        );
+        encase::StorageBuffer::new(data.as_mut())
+            .write(v)
+            .expect("failed to write to storage buffer");
     }
 
     #[must_use]

@@ -5,7 +5,7 @@ use std::{
     future::Future,
     io::{self, Write},
     path,
-    sync::{LazyLock, Mutex},
+    sync::{LazyLock, Mutex, MutexGuard},
     time::Instant,
 };
 
@@ -94,10 +94,18 @@ impl Metrics {
         }
     }
 
+    fn lock_global() -> MutexGuard<'static, Self> {
+        match GLOBAL_METRICS.lock() {
+            Ok(g) => g,
+            Err(mut err) => {
+                **err.get_mut() = Metrics::new();
+                err.into_inner()
+            }
+        }
+    }
+
     pub fn push(name: &str, v: f64) {
-        GLOBAL_METRICS
-            .lock()
-            .unwrap()
+        Self::lock_global()
             .marks
             .entry(name.to_string())
             .or_default()
@@ -105,9 +113,7 @@ impl Metrics {
     }
 
     pub fn current_marks() -> HashMap<String, (f64, f64, usize)> {
-        GLOBAL_METRICS
-            .lock()
-            .unwrap()
+        Self::lock_global()
             .marks
             .iter()
             .map(|(k, v)| (k.clone(), (v.average(), v.std_dev(), v.len())))
@@ -115,7 +121,7 @@ impl Metrics {
     }
 
     pub fn reset() {
-        GLOBAL_METRICS.lock().unwrap().marks = HashMap::new();
+        Self::lock_global().marks = HashMap::new();
     }
 
     pub fn save_csv(out_path: impl AsRef<path::Path>) -> io::Result<()> {
@@ -133,7 +139,7 @@ impl Metrics {
     }
 
     pub fn with(f: impl FnOnce(&Self)) {
-        f(&*GLOBAL_METRICS.lock().unwrap())
+        f(&*Self::lock_global())
     }
 }
 

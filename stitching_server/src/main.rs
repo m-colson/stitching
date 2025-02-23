@@ -71,8 +71,10 @@ impl Args {
                     let [width, height] = c.meta.resolution;
                     let mut buf = vec![0u8; (width * height * 4) as usize].into_boxed_slice();
                     let c = c.load::<Box<[u8]>>()?;
-                    let ticket = c.data.give(buf)?;
-                    buf = ticket.block_take()?;
+                    for _ in 0..10 {
+                        let ticket = c.data.give(buf)?;
+                        buf = ticket.block_take()?;
+                    }
                     image::save_buffer(
                         format!("capture{i}.png"),
                         &buf,
@@ -82,6 +84,10 @@ impl Args {
                     )?;
                 }
             }
+            #[cfg(not(feature = "capture"))]
+            ArgCommand::CaptureLive => {
+                anyhow::bail!("this binary was not compiled with the \"capture\" feature enabled, which is required for this subcommand");
+            }
         }
         Ok(())
     }
@@ -89,6 +95,7 @@ impl Args {
 
 #[derive(Clone, Debug, Subcommand)]
 pub enum ArgCommand {
+    /// Serve the http server
     Serve {
         #[arg(short, long)]
         timeout: Option<u64>,
@@ -97,7 +104,6 @@ pub enum ArgCommand {
         #[arg(short, long, default_value_t = 2780)]
         port: u16,
     },
-    // ListLive,
-    #[cfg(feature = "capture")]
+    /// Capture a raw image from every configured cameras and save them as capture*.png
     CaptureLive,
 }

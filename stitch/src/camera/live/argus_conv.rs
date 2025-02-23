@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     loader::{Loader, OwnedWriteBuffer},
-    Result,
+    Error, Result,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,10 +47,16 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
         let iprovider = provider.as_interface();
 
         let devices = iprovider.get_camera_devices()?;
-        let device = devices[index];
+        let Some(&device) = devices.get(index) else {
+            return Err(Error::Other(format!("device {index} does not exist")));
+        };
 
         let modes = device.as_properties().get_all_sensor_modes()?;
-        let mode = modes[mode];
+        let Some(&mode) = modes.get(mode) else {
+            return Err(Error::Other(format!(
+                "mode {mode} does not exist for device {index}"
+            )));
+        };
 
         let mut cap_session = iprovider.create_capture_session(device)?;
         let mut isession = cap_session.as_interface();
@@ -59,7 +65,6 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
         let mut egl_out_settings = out_settings.as_egl_interface();
         egl_out_settings.set_pixel_format(PixelFormat::YCBCR_420_888)?;
         egl_out_settings.set_resolution(mode.as_interface().get_resolution())?;
-        // egl_out_settings.set_metadata_enable(true)?;
 
         let out_stream = isession.create_output_stream(&out_settings)?;
 
@@ -111,6 +116,7 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
                     } else {
                         tracing::error!("attempted to copy zero bytes, ignoring...");
                     }
+
                     // if the receiver has been dropped, they don't want their buffer back!
                     _ = resp_send.send(req);
                 }

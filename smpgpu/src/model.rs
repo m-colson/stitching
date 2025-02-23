@@ -117,7 +117,7 @@ where
 {
     #[cfg(feature = "obj-file")]
     pub fn obj_file_reader(mut self, r: impl std::io::BufRead) -> Self {
-        let obj = obj::load_obj(r).unwrap();
+        let obj = obj::load_obj(r).expect("failed to load model object file");
         self.verts = obj
             .vertices
             .into_iter()
@@ -127,6 +127,16 @@ where
             })
             .collect::<Vec<_>>()
             .into();
+
+        // let (cmin, cmax) = self.verts.iter().fold(
+        //     (
+        //         glam::vec4(f32::MAX, f32::MAX, f32::MAX, 1.),
+        //         glam::vec4(f32::MIN, f32::MIN, f32::MIN, 1.),
+        //     ),
+        //     |(cmin, cmax), v| (v.pos.min(cmin), v.pos.max(cmax)),
+        // );
+        // println!("model has min {cmin:?} and max {cmax:?}");
+
         self.idxs = obj.indices.into();
         self
     }

@@ -1,7 +1,7 @@
 use std::{borrow::Cow, f32::consts::PI, ops::DerefMut, path::PathBuf, sync::Arc};
 
 use encase::ShaderType;
-use glam::Mat4;
+use glam::{Mat4, Quat};
 use smpgpu::{
     global as glob_gpu,
     model::{Model, ModelBuilder, VertPosNorm},
@@ -18,7 +18,7 @@ use crate::{
     Result,
 };
 
-use super::ViewStyle;
+use super::{ViewStyle, WorldStyle};
 
 #[derive(Clone, Debug)]
 pub struct InverseView(pub Mat4);
@@ -70,7 +70,7 @@ struct InputSpec {
 impl InputSpec {
     #[inline]
     fn from_view(s: ViewParams, resolution: glam::UVec2, data_start: u32) -> Self {
-        let rev_mat = glam::Mat3::from_euler(glam::EulerRot::ZXY, s.azimuth, s.pitch, s.roll);
+        let rev_mat = glam::Mat3::from_euler(glam::EulerRot::YXZ, s.roll, s.pitch, s.azimuth);
 
         Self {
             resolution,
@@ -165,12 +165,20 @@ pub struct GpuProjectorBuilder<'a> {
     input_sizes: Vec<glam::UVec2>,
     out_size: (usize, usize),
     num_subs: usize,
-    bound_verts: Vec<Vertex>,
-    bound_idxs: Vec<u16>,
+    world_verts: Vec<Vertex>,
+    world_idxs: Vec<u16>,
     mask_paths: Vec<Option<PathBuf>>,
-    model_builder: Option<smpgpu::model::ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>>,
+    model_builder: Option<(
+        smpgpu::model::ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>,
+        ModelOptions,
+    )>,
     model_origin: glam::Vec3,
     model_scale: glam::Vec3,
+    model_rot: glam::Vec3,
+}
+
+pub struct ModelOptions {
+    pub light_dir: Uniform<glam::Vec3>,
 }
 
 impl<'a> GpuProjectorBuilder<'a> {
@@ -179,12 +187,13 @@ impl<'a> GpuProjectorBuilder<'a> {
             input_sizes: Vec::new(),
             out_size: (0, 0),
             num_subs: 0,
-            bound_verts: Vec::new(),
-            bound_idxs: Vec::new(),
+            world_verts: Vec::new(),
+            world_idxs: Vec::new(),
             mask_paths: Vec::new(),
             model_builder: None,
             model_origin: glam::vec3(0., 0., 0.),
             model_scale: glam::vec3(1., 1., 1.),
+            model_rot: glam::vec3(0., 0., 0.),
         }
     }
 
@@ -207,35 +216,8 @@ impl<'a> GpuProjectorBuilder<'a> {
         self
     }
 
-    pub fn cylinder_bound(mut self) -> Self {
-        const SLICES: u16 = 20;
-        const RADIUS: f32 = 70.;
-        const HEIGHT: f32 = 80.;
-
-        let mut verts = Vec::new();
-        verts.push(Vertex::new(0., 0., 0.));
-
-        for n in 0..SLICES {
-            let (x, y) = (2. * PI * n as f32 / SLICES as f32).sin_cos();
-            let (x, y) = (x * RADIUS, y * RADIUS);
-            verts.extend([Vertex::new(x, y, 0.), Vertex::new(x, y, HEIGHT)])
-        }
-
-        let mut idxs = Vec::new();
-        for n in 0..(SLICES - 1) {
-            let bn = n * 2 + 1;
-            idxs.extend([0, bn, bn + 2]);
-            idxs.extend([bn + 2, bn, bn + 1]);
-            idxs.extend([bn + 1, bn + 3, bn + 2]);
-        }
-
-        let last_bn = SLICES * 2 - 1;
-        idxs.extend([0, last_bn, 1]);
-        idxs.extend([1, last_bn, last_bn + 1]);
-        idxs.extend([last_bn + 1, 2, 1]);
-
-        self.bound_verts = verts;
-        self.bound_idxs = idxs;
+    pub fn world(mut self, world: &WorldStyle) -> Self {
+        (self.world_verts, self.world_idxs) = world.make_mesh();
         self
     }
 
@@ -248,12 +230,18 @@ impl<'a> GpuProjectorBuilder<'a> {
         mut self,
         f: impl FnOnce(
             ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>,
+            &mut ModelOptions,
         ) -> ModelBuilder<'a, smpgpu::model::VertPosNorm, u32>,
     ) -> Self {
-        self.model_builder = Some(f(self
-            .model_builder
-            .take()
-            .unwrap_or_else(|| glob_gpu::model())));
+        let (m, mut opts) = self.model_builder.take().unwrap_or_else(|| {
+            (
+                glob_gpu::model(),
+                ModelOptions {
+                    light_dir: glob_gpu::uniform().writable().build(),
+                },
+            )
+        });
+        self.model_builder = Some((f(m, &mut opts), opts));
         self
     }
 
@@ -264,6 +252,11 @@ impl<'a> GpuProjectorBuilder<'a> {
 
     pub fn model_scale(mut self, scale: [f32; 3]) -> Self {
         self.model_scale = scale.into();
+        self
+    }
+
+    pub fn model_rot_deg(mut self, angles: [f32; 3]) -> Self {
+        self.model_rot = angles.map(|v| v.to_radians()).into();
         self
     }
 
@@ -296,8 +289,8 @@ impl<'a> GpuProjectorBuilder<'a> {
         let render_shader = smpgpu::include_shader!("shaders/render.wgsl" => "vs_proj" & "fs_proj");
 
         let back = glob_gpu::model()
-            .verts(&self.bound_verts)
-            .indices(&self.bound_idxs)
+            .verts(&self.world_verts)
+            .indices(&self.world_idxs)
             .cp_build_cam(&main_out.cam, |cp| {
                 cp.group(
                     pass_info.in_frag()
@@ -345,9 +338,10 @@ impl<'a> GpuProjectorBuilder<'a> {
             })
             .collect();
 
-        let object_model = self.model_builder.map(|b| {
+        let object_model = self.model_builder.map(|(b, ref opts)| {
             b.cp_build_cam(&main_out.cam, |cp| {
-                cp.shader(smpgpu::include_shader!("shaders/model.wgsl"))
+                cp.group(opts.light_dir.in_frag())
+                    .shader(smpgpu::include_shader!("shaders/model.wgsl"))
                     .cull_backface()
                     .enable_depth()
                     .vert_buffer_of::<VertPosNorm>(
@@ -356,11 +350,15 @@ impl<'a> GpuProjectorBuilder<'a> {
                     .frag_target(main_out.texture.format())
                     .build()
             })
-            .with_view(Mat4::from_scale_rotation_translation(
-                self.model_scale,
-                glam::Quat::IDENTITY,
-                self.model_origin,
-            ))
+            .with_view(
+                Mat4::from_quat(Quat::from_euler(
+                    glam::EulerRot::ZXY,
+                    self.model_rot[0],
+                    self.model_rot[1],
+                    self.model_rot[2],
+                )) * Mat4::from_translation(-self.model_origin)
+                    * Mat4::from_scale(self.model_scale),
+            )
         });
 
         let depth_texture = glob_gpu::texture()
@@ -369,8 +367,8 @@ impl<'a> GpuProjectorBuilder<'a> {
             .depth()
             .build();
 
-        let bound_vertices = glob_gpu::vertex_buffer().len(4096).writable().build();
-        let bound_cp = glob_gpu::checkpoint()
+        let bounding_vertices = glob_gpu::vertex_buffer().len(4096).writable().build();
+        let bounding_cp = glob_gpu::checkpoint()
             .group(back.view.in_vertex() & main_out.cam.in_vertex())
             .shader(smpgpu::include_shader!("shaders/bounds.wgsl"))
             .enable_depth()
@@ -392,9 +390,9 @@ impl<'a> GpuProjectorBuilder<'a> {
             object_model,
             sub_outs,
             last_sub_views: Vec::new(),
-            bounding_vertices: bound_vertices,
+            bounding_vertices,
             bounding_vertices_len: 0,
-            bounding_cp: bound_cp,
+            bounding_cp,
         }
     }
 

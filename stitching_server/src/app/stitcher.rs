@@ -40,18 +40,21 @@ impl Sticher {
             .num_subs(subs)
             .input_sizes(cam_resolutions)
             .out_size(proj_w, proj_h)
-            .cylinder_bound()
+            .world(&cfg.world)
             .masks_from_cfgs(&cfg.cameras);
 
         if let Some(model) = &cfg.model {
             proj_builder = proj_builder
-                .model(|m| {
+                .model(|m, ops| {
+                    ops.light_dir
+                        .set_global(&model.light_dir.unwrap_or([1., -0.5, 1.]).into());
                     m.obj_file_reader(BufReader::new(
                         File::open(&model.path).expect("unable to read model"),
                     ))
                 })
                 .model_origin(model.origin)
                 .model_scale(model.scale.unwrap_or([1., 1., 1.]))
+                .model_rot_deg(model.rot.unwrap_or([0., 0., 0.]))
         }
 
         let mut proj = proj_builder.build();
@@ -59,7 +62,7 @@ impl Sticher {
         let (msg_send, msg_recv) = kanal::bounded(0);
         let (update_send, update_recv) = kanal::bounded(subs);
 
-        let inferer = InferHost::<InverseView>::spawn(subs).unwrap();
+        let inferer = InferHost::<InverseView>::spawn(subs).expect("failed to create infer host");
 
         let req_inferer = inferer.clone();
         let bound_update_send = update_send.clone_async();
@@ -102,7 +105,13 @@ impl Sticher {
                             }
                         }
 
-                        done_sends[n].take().unwrap().send(vertices).unwrap();
+                        // if this fails, the receiver has already closed for
+                        // this loop, so we can ignore the error.
+                        _ = done_sends[n].take()
+                            .expect(
+                                "the infer request done signal was already used, which should be impossible"
+                            )
+                            .send(vertices);
                     })
                     .await;
 
@@ -117,10 +126,11 @@ impl Sticher {
                 .flatten()
                 .collect();
 
-                bound_update_send
-                    .send(Update::Bounds(vertices))
-                    .await
-                    .unwrap();
+                // if this fails, the stitcher has probably exited and we also need exit
+                if let Err(err) = bound_update_send.send(Update::Bounds(vertices)).await {
+                    tracing::error!("bound updater exiting because it was unable to message the stitcher: {err:?}");
+                    return;
+                }
             }
         });
 
@@ -256,7 +266,10 @@ impl SticherInner<GpuDirectBufferWrite> {
             proj.wait_for_subs(sub_handler.clone()).await;
             timer.mark("sub-wait");
 
-            let msg = msg_handle.await.unwrap();
+            let Ok(msg) = msg_handle.await else {
+                tracing::error!("failed to receive encoded frame, dropping...");
+                continue;
+            };
             timer.mark("encode-wait");
 
             if self.sender.send(msg).is_err() {

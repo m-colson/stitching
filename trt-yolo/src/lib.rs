@@ -21,12 +21,13 @@ impl<'a> Inferer<'a> {
         let in_byte_count = in_elems * size_of::<u8>();
         let out_byte_count = out_elems * size_of::<half::f16>();
 
-        let stream = CudaStream::new().unwrap();
+        let stream = CudaStream::new().expect("failed to create cuda stream");
 
-        let in_mem = CudaBuffer::new(in_byte_count).unwrap();
+        let in_mem = CudaBuffer::new(in_byte_count).expect("failed to create input cuda buffer");
         ctx.set_input_tensor(c"images", &in_mem);
 
-        let mut out_mem = CudaBuffer::new(out_byte_count).unwrap();
+        let mut out_mem =
+            CudaBuffer::new(out_byte_count).expect("failed to create output cuda buffer");
         ctx.set_output_tensor(c"output0", &mut out_mem);
 
         Self {

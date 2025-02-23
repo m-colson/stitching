@@ -40,13 +40,18 @@ impl<T: Send + 'static> InferHost<T> {
 
         let host_in_bufs = in_bufs.clone();
         tokio::spawn(async move {
-            let mut out_mem = CudaBuffer::new(which.out_elems() * size_of::<half::f16>()).unwrap();
+            let mut out_mem = CudaBuffer::new(which.out_elems() * size_of::<half::f16>())
+                .expect("failed to create infer output cuda buffer");
             let mut out_buf = vec![half::f16::from_f32_const(0.); which.out_elems()];
 
-            let runtime = RuntimeEngineContext::new_engine_slice(&which.plan_data().unwrap());
+            let runtime = RuntimeEngineContext::new_engine_slice(
+                &which
+                    .plan_data()
+                    .expect("failed to load infer plan data for {which:?}"),
+            );
             runtime.as_ctx().set_output_tensor(c"output0", &mut out_mem);
 
-            let stream = CudaStream::new().unwrap();
+            let stream = CudaStream::new().expect("failed to create infer cuda stream");
             loop {
                 match ready_recv.recv().await {
                     Ok(mut f) => {
@@ -66,7 +71,9 @@ impl<T: Send + 'static> InferHost<T> {
                                 continue;
                             }
 
-                            stream.synchronize().unwrap();
+                            stream
+                                .synchronize()
+                                .expect("failed to synchronize infer stream");
 
                             f(
                                 n,

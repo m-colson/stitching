@@ -65,7 +65,7 @@ impl SettingsPacket {
     #[inline]
     pub const fn view_type(self) -> ProjectionStyle {
         match self.view_type {
-            255 => ProjectionStyle::Flat,
+            255 => ProjectionStyle::Normal,
             n => ProjectionStyle::RawCamera(n as _),
         }
     }
@@ -76,7 +76,8 @@ pub struct VideoPacket(Arc<[u8]>);
 impl VideoPacket {
     #[inline]
     pub fn new(width: usize, height: usize, chans: usize) -> stitch::Result<Self> {
-        let mut inner = <[u8]>::new_box_zeroed_with_elems(width * height * chans + 16).unwrap();
+        let mut inner = <[u8]>::new_box_zeroed_with_elems(width * height * chans + 16)
+            .expect("failed to create buffer for video packet");
         inner[0] = PacketKind::UpdateFrame as _;
         little_endian::U16::new(width.try_into()?)
             .write_to(&mut inner[1..3])
@@ -94,7 +95,7 @@ impl VideoPacket {
         if let Some(inner) = &mut self.mut_inner_data() {
             little_endian::F64::new(TimingPacket::new_now().server_send)
                 .write_to(&mut inner[8..16])
-                .unwrap();
+                .expect("failed to write packet send time");
         }
     }
 
@@ -106,13 +107,7 @@ impl VideoPacket {
             flate2::GzBuilder::new()
                 .buf_read(Cursor::new(&buf), flate2::Compression::fast())
                 .read_to_end(&mut out)
-                .unwrap();
-
-            // tracing::debug!(
-            //     "compressed {:?} bytes to {:?} bytes",
-            //     self.0.len(),
-            //     out.len()
-            // );
+                .expect("failed to compress video packet");
 
             Message::Binary(out.into())
         })
@@ -135,13 +130,13 @@ impl VideoPacket {
 impl FrameSize for VideoPacket {
     fn width(&self) -> usize {
         little_endian::U16::ref_from_bytes(&self.0[1..3])
-            .unwrap()
+            .expect("failed to cast bytes to a u16")
             .get() as _
     }
 
     fn height(&self) -> usize {
         little_endian::U16::ref_from_bytes(&self.0[3..5])
-            .unwrap()
+            .expect("failed to cast bytes to a u16")
             .get() as _
     }
 
