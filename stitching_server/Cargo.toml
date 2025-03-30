@@ -1,11 +1,14 @@
 [package]
 name = "stitching_server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [features]
-default = []
+default = ["trt"]
 capture = ["dep:image"]
+trt = ["dep:trt-yolo", "dep:tensorrt"]
+video = ["stitch/v4l", "stitch/argus"]
+jetson = ["trt", "video"]
 
 [dependencies]
 anyhow = "1.0.93"
@@ -28,17 +31,24 @@ half = "2.4.1"
 glam.workspace = true
 image = { workspace = true, optional = true }
 kanal.workspace = true
-tensorrt = { version = "0.1.0", path = "../tensorrt", features = ["tracing"] }
 thiserror.workspace = true
 tokio = { workspace = true }
 tower-http = { version = "0.6.1", features = ["fs", "trace"] }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3.18", default-features = false, features = ["ansi", "env-filter", "registry"] }
-trt-yolo = { version = "0.1.0", path = "../trt-yolo" }
+tracing-subscriber = { version = "0.3.18", default-features = false, features = [
+    "ansi",
+    "env-filter",
+    "registry",
+] }
+trt-yolo = { version = "0.1.0", path = "../trt-yolo", optional = true }
+tensorrt = { version = "0.1.0", path = "../tensorrt", features = [
+    "tracing",
+], optional = true }
 zerocopy = { version = "0.8.9", features = ["alloc"] }
 flate2 = "1.0.35"
+cam-loader = { version = "0.1.0", path = "../cam-loader" }
 
 [dependencies.stitch]
 path = "../stitch"
 default-features = false
-features = ["toml-cfg", "live", "gpu", "obj-file"]
+features = ["toml-cfg", "gpu", "obj-file"]

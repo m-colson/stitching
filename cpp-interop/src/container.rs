@@ -15,6 +15,8 @@ union CapacityOrBuf {
 }
 
 impl CppString {
+    /// # Safety
+    /// The data within this string should have been created by C++ code, which will enforce null terminatation.
     #[inline]
     pub unsafe fn c_str(&self) -> &ffi::CStr {
         ffi::CStr::from_ptr(self.data)
@@ -47,6 +49,12 @@ impl<T> CppVector<T> {
             end_cap: std::ptr::null(),
             _t: PhantomData,
         }
+    }
+}
+
+impl<T> Default for CppVector<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

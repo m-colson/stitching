@@ -6,8 +6,9 @@ use std::{
 };
 
 use axum::extract::ws::Message;
-use stitch::{buf::FrameSize, proj::ProjectionStyle};
-use zerocopy::{little_endian, FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout};
+use cam_loader::{OwnedWriteBuffer, buf::FrameSize};
+use stitch::proj::ProjectionStyle;
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, little_endian};
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
@@ -142,6 +143,14 @@ impl FrameSize for VideoPacket {
 
     fn chans(&self) -> usize {
         self.0[5] as usize
+    }
+}
+
+impl OwnedWriteBuffer for VideoPacket {
+    type View<'a> = &'a mut [u8];
+
+    fn owned_to_view(&mut self) -> Option<Self::View<'_>> {
+        Some(self)
     }
 }
 

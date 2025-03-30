@@ -10,10 +10,12 @@ mod mem;
 mod sampler;
 mod shader;
 mod texture;
-mod typed_buffer;
 
 pub use bind::{AsBinding, AutoVisBindable, Bindings, VisBindable};
-pub use buffer::{Buffer, BufferBuilder};
+pub use buffer::{
+    typed::{IndexBuffer, StorageBuffer, Uniform, VertexBuffer},
+    Buffer,
+};
 pub use cmd::{
     AsRenderItem, Checkpoint, ColorAttachment, ComputeCheckpoint, ComputeItem, CopyOp,
     DepthAttachment, FragTarget, Pass, RenderCheckpoint, RenderItem,
@@ -25,7 +27,6 @@ pub mod model;
 pub use sampler::Sampler;
 pub use shader::{RenderShader, Shader};
 pub use texture::Texture;
-pub use typed_buffer::{IndexBuffer, StorageBuffer, Uniform, VertexBuffer};
 
 /// The error type for operations in this crate
 #[derive(thiserror::Error, Debug)]

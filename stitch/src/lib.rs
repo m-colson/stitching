@@ -1,6 +1,5 @@
-pub mod buf;
 pub mod camera;
-pub mod loader;
+// pub mod loader;
 pub mod proj;
 pub(crate) mod util;
 
@@ -21,20 +20,14 @@ pub enum Error {
     ImageCastFailure,
 
     #[error(transparent)]
-    Dims(#[from] DimError),
-
-    #[error(transparent)]
     IntOOB(#[from] std::num::TryFromIntError),
-
-    #[error("loader failed to accept or return buffer")]
-    BufferLost,
 
     #[cfg(feature = "toml-cfg")]
     #[error("decode error: {0}")]
     DecodeError(#[from] toml::de::Error),
 
-    #[error(transparent)]
-    ArgusError(#[from] argus::Error),
+    #[error("loader error: {0}")]
+    Loader(#[from] cam_loader::Error),
 
     #[cfg(feature = "gpu")]
     #[error("gpu error: {0}")]
@@ -50,50 +43,6 @@ pub enum Error {
 impl Error {
     pub fn io_ctx(msg: impl AsRef<str>) -> impl FnOnce(std::io::Error) -> Self {
         move |err| Self::IOWhen(err, msg.as_ref().to_string())
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("{kind} mismatch: {exp} != {got}")]
-pub struct DimError {
-    pub kind: DimErrorKind,
-    pub exp: usize,
-    pub got: usize,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum DimErrorKind {
-    Width,
-    Height,
-    Channel,
-    Bytes,
-}
-
-impl std::fmt::Display for DimErrorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Width => write!(f, "width"),
-            Self::Height => write!(f, "height"),
-            Self::Channel => write!(f, "channel"),
-            Self::Bytes => write!(f, "bytes"),
-        }
-    }
-}
-
-impl DimErrorKind {
-    #[must_use]
-    pub const fn err(self, exp: usize, got: usize) -> DimError {
-        DimError {
-            kind: self,
-            exp,
-            got,
-        }
-    }
-
-    /// # Errors
-    /// the `exp` value is different from the `got` value
-    pub fn check(self, exp: usize, got: usize) -> std::result::Result<(), DimError> {
-        (exp == got).then_some(()).ok_or_else(|| self.err(exp, got))
     }
 }
 

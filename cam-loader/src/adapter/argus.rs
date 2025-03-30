@@ -10,8 +10,8 @@ use argus::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    loader::{Loader, OwnedWriteBuffer},
     Error, Result,
+    loader::{Loader, OwnedWriteBuffer},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

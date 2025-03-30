@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 // #[cfg(target_os = "windows")]
 // const CUDA_ROOT: &str = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/";
 // #[cfg(target_os = "linux")]
@@ -20,6 +18,10 @@ use std::path::PathBuf;
 // #[cfg(target_os = "linux")]
 // const CUDA_INCLUDE: &str = "/usr/local/cuda-12.6/include";
 
+#[cfg(target_os = "windows")]
+fn main() {}
+
+#[cfg(target_os = "linux")]
 fn configuration() {
     // println!("cargo:rustc-link-search={CUDA_BIN}");
 
@@ -30,12 +32,10 @@ fn configuration() {
     // cuda_configuration();
 }
 
-// fn cuda_configuration() {
-//     println!("cargo:rustc-link-search={CUDA_LIB64}");
-//     println!("cargo:rustc-link-lib=dylib=cudart");
-// }
-
+#[cfg(target_os = "linux")]
 fn main() {
+    use std::path::PathBuf;
+
     let bindings = bindgen::Builder::default()
         .header("wrapper.hpp")
         .allowlist_recursively(false)

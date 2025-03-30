@@ -6,7 +6,7 @@ radius = 70
 # origin = [0, 0, 0]
 path = "assets/new_plane.obj"
 origin = [25.5, 0, 27.15]
-scale = [0.1, 0.1, 0.1] # obj file is in mm
+scale = [0.1, 0.1, 0.1]       # obj file is in mm
 rot = [0, 90, 90]
 light_dir = [1, 1, -0.5]
 
@@ -26,24 +26,26 @@ z = 30
 look_at = [0, 0, 10]
 frame_per_rev = 500
 
+# NOTE: this order of cameras is expected in the UI
+
 [[cameras]]
 pos = [0, -1.82, 4.68]
-pitch = 70
+pitch = 50
 azimuth = 0
-roll = -90
+roll = 0
 sensor = { img_off = [0, 40.4], fov.W = 175.6 }
 lens = "equisolid"
 resolution = [1920, 1080]
 framerate = 30
 
-mask_path = "assets/bottom-mask.png"
+# mask_path = "assets/bottom-mask.png"
 
-v4l.index = 2
+v4l.index = 6
 # pattern.color = [255, 40, 150]
 
 [[cameras]]
 pos = [0, -19.38, 27.36]
-pitch = 8
+pitch = 25
 azimuth = -3.62
 roll = -1.27
 sensor = { img_off = [0, 40.4], fov.D = 175.6 }
@@ -53,9 +55,8 @@ framerate = 30
 
 mask_path = "assets/tail-mask.png"
 
-v4l.index = 6
+v4l.index = 2
 # pattern.color = [255, 90, 60]
-
 
 [[cameras]]
 pos = [-5.3, -10.85, 13.63]
@@ -69,7 +70,7 @@ framerate = 21
 
 mask_path = "assets/left-mask.png"
 
-argus = {index = 0, mode = 0}
+argus = { index = 0, mode = 0 }
 # pattern.color = [0, 255, 0]
 
 [[cameras]]
@@ -84,5 +85,5 @@ framerate = 21
 
 mask_path = "assets/right-mask.png"
 
-argus = {index = 1, mode = 0}
+argus = { index = 1, mode = 0 }
 # pattern.color = [0, 0, 255]

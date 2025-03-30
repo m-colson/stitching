@@ -1,12 +1,17 @@
 use encase::{CalculateSizeFor, ShaderSize};
+use typed::{IndexBufferBuilder, IndexBufferFormat};
 use wgpu::util::DeviceExt;
+
+pub(crate) mod typed;
 
 use crate::{
     bind::{AsBinding, BindResource},
+    buffer::typed::{StorageBufferBuilder, UniformBuilder, VertexBufferBuilder},
     cmd::CopyOp,
 };
 
 /// Wrapper type over a [`wgpu::Buffer`]
+#[derive(Clone, Debug)]
 pub struct Buffer {
     inner: wgpu::Buffer,
 }
@@ -14,8 +19,8 @@ pub struct Buffer {
 impl Buffer {
     /// Create a new [`BufferBuilder`] for `dev`.
     #[inline]
-    pub fn builder(dev: &impl AsRef<wgpu::Device>) -> BufferBuilder<'_> {
-        BufferBuilder::new(dev.as_ref())
+    pub fn builder<'a>(dev: &'a impl AsRef<wgpu::Device>, label: &'a str) -> BufferBuilder<'a> {
+        BufferBuilder::new(dev.as_ref(), Some(label))
     }
 
     /// Create a new operation that will copy the data of `self` to `buf`.
@@ -49,34 +54,39 @@ impl AsBinding for Buffer {
 }
 
 /// Builder type for creating a [`Buffer`].
-pub struct BufferBuilder<'a> {
+pub struct BufferBuilder<'a, K = ()> {
     dev: &'a wgpu::Device,
     label: Option<&'a str>,
     size: u64,
     usage: wgpu::BufferUsages,
     init_data: Option<&'a [u8]>,
+    k: K,
 }
 
 impl<'a> BufferBuilder<'a> {
     /// Create a new [`BufferBuilder`] for `dev`.
     #[must_use]
     #[inline]
-    pub const fn new(dev: &'a wgpu::Device) -> Self {
+    pub const fn new(dev: &'a wgpu::Device, label: Option<&'a str>) -> Self {
         Self {
             dev,
-            label: None,
+            label,
             size: 0,
             usage: wgpu::BufferUsages::empty(),
             init_data: None,
+            k: (),
         }
     }
 
-    /// Use `label` when creating the buffer.
-    #[must_use]
-    #[inline]
-    pub const fn label(mut self, label: &'a str) -> Self {
-        self.label = Some(label);
-        self
+    fn with_kind<K: Default>(self) -> BufferBuilder<'a, K> {
+        BufferBuilder {
+            dev: self.dev,
+            label: self.label,
+            size: self.size,
+            usage: self.usage,
+            init_data: self.init_data,
+            k: K::default(),
+        }
     }
 
     /// Use the specified `size` when creating the buffer.
@@ -87,10 +97,42 @@ impl<'a> BufferBuilder<'a> {
         self
     }
 
+    /// Mark the created buffer for storage use.
+    #[must_use]
+    #[inline]
+    pub fn storage<T: ShaderSize>(self) -> StorageBufferBuilder<'a, T> {
+        self.with_usage(wgpu::BufferUsages::STORAGE).with_kind()
+    }
+
+    /// Mark the created buffer for uniform value use.
+    #[must_use]
+    #[inline]
+    pub fn uniform<T: ShaderSize>(self) -> UniformBuilder<'a, T> {
+        self.size_for::<T>()
+            .with_usage(wgpu::BufferUsages::UNIFORM)
+            .with_kind()
+    }
+
+    /// Mark the created buffer for vertex use.
+    #[must_use]
+    #[inline]
+    pub fn vertex<T: ShaderSize>(self) -> VertexBufferBuilder<'a, T> {
+        self.with_usage(wgpu::BufferUsages::VERTEX).with_kind()
+    }
+
+    /// Mark the created buffer for index use.
+    #[must_use]
+    #[inline]
+    pub fn index<T: IndexBufferFormat>(self) -> IndexBufferBuilder<'a, T> {
+        self.with_usage(wgpu::BufferUsages::INDEX).with_kind()
+    }
+}
+
+impl<'a, K> BufferBuilder<'a, K> {
     /// Use the size required for one `T` when creating the buffer.
     #[must_use]
     #[inline]
-    pub fn size_for<T: ShaderSize>(mut self) -> Self {
+    fn size_for<T: ShaderSize>(mut self) -> Self {
         self.size = u64::from(T::SHADER_SIZE);
         self
     }
@@ -98,7 +140,7 @@ impl<'a> BufferBuilder<'a> {
     /// Use the size required for `elms` `T` when creating the buffer.
     #[must_use]
     #[inline]
-    pub fn size_for_many<T>(mut self, elms: u64) -> Self
+    fn size_for_many<T>(mut self, elms: u64) -> Self
     where
         Vec<T>: CalculateSizeFor,
     {
@@ -122,70 +164,32 @@ impl<'a> BufferBuilder<'a> {
         self
     }
 
-    /// Mark the created buffer as being readable on cpu side (can copy from it).
+    /// Mark the created buffer as being readable by the host side (can copy from it).
     #[must_use]
     #[inline]
     pub fn readable(self) -> Self {
         self.with_usage(wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE)
     }
 
-    /// Mark the created buffer as being writable on cpu side (can copy to it).
+    /// Mark the created buffer as being writable by the host side (can copy to it).
     #[must_use]
     #[inline]
     pub fn writable(self) -> Self {
         self.with_usage(wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ)
     }
 
-    /// Mark the created buffer for storage use.
-    #[must_use]
-    #[inline]
-    pub fn storage(self) -> Self {
-        self.with_usage(wgpu::BufferUsages::STORAGE)
-    }
-
-    /// Mark the created buffer for uniform value use.
-    #[must_use]
-    #[inline]
-    pub fn uniform(self) -> Self {
-        self.with_usage(wgpu::BufferUsages::UNIFORM)
-    }
-
-    /// Mark the created buffer for vertex use.
-    #[must_use]
-    #[inline]
-    pub fn vertex(self) -> Self {
-        self.with_usage(wgpu::BufferUsages::VERTEX)
-    }
-
-    /// Mark the created buffer for index use.
-    #[must_use]
-    #[inline]
-    pub fn index(self) -> Self {
-        self.with_usage(wgpu::BufferUsages::INDEX)
-    }
-
     /// Initalize with raw `data` when creating the buffer.
     #[must_use]
     #[inline]
-    pub fn init_bytes(mut self, data: &'a [u8]) -> Self {
+    pub(crate) fn init_bytes(mut self, data: &'a [u8]) -> Self {
         self.init_data = Some(data);
         self
-    }
-
-    /// Initialize with the contents of `data` when creating the buffer.
-    /// SAFETY: T must be safe to transmute to bytes (likely true for any type you would want to put in a buffer).
-    #[must_use]
-    #[inline]
-    pub fn init_data<T>(self, data: &'a [T]) -> Self {
-        self.init_bytes(unsafe {
-            std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data))
-        })
     }
 
     /// Complete the builder and create the final [`Buffer`].
     #[must_use]
     #[inline]
-    pub fn build(self) -> Buffer {
+    pub(crate) fn build_untyped(self) -> Buffer {
         let inner = match self.init_data {
             Some(contents) => self
                 .dev

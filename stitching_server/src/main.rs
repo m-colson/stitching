@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use util::Metrics;
 
 mod app;
+#[cfg(feature = "trt")]
 mod infer_host;
 mod log;
 mod util;
@@ -65,12 +66,12 @@ impl Args {
             }
             #[cfg(feature = "capture")]
             ArgCommand::CaptureLive => {
-                use stitch::{camera::live, proj};
-                let cfg = proj::Config::<live::Config>::open("live.toml")?;
+                use stitch::{camera, proj};
+                let cfg = proj::Config::<cam_loader::Config>::open("live.toml")?;
                 for (i, c) in cfg.cameras.into_iter().enumerate() {
                     let [width, height] = c.meta.resolution;
-                    let mut buf = vec![0u8; (width * height * 4) as usize].into_boxed_slice();
-                    let c = c.load::<Box<[u8]>>()?;
+                    let mut buf = vec![0u8; (width * height * 4) as usize];
+                    let c = c.load::<Vec<u8>>()?;
                     for _ in 0..10 {
                         let ticket = c.data.give(buf)?;
                         buf = ticket.block_take()?;
@@ -86,7 +87,9 @@ impl Args {
             }
             #[cfg(not(feature = "capture"))]
             ArgCommand::CaptureLive => {
-                anyhow::bail!("this binary was not compiled with the \"capture\" feature enabled, which is required for this subcommand");
+                anyhow::bail!(
+                    "this binary was not compiled with the \"capture\" feature enabled, which is required for this subcommand"
+                );
             }
         }
         Ok(())
@@ -99,7 +102,7 @@ pub enum ArgCommand {
     Serve {
         #[arg(short, long)]
         timeout: Option<u64>,
-        #[arg(short, long, default_value = "0.0.0.0")]
+        #[arg(long, default_value = "0.0.0.0")]
         host: Ipv4Addr,
         #[arg(short, long, default_value_t = 2780)]
         port: u16,

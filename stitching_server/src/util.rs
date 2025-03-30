@@ -6,11 +6,11 @@ use std::{
     io::{self, Write},
     path,
     sync::{LazyLock, Mutex, MutexGuard},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use axum::{
-    extract::{ws::WebSocket, FromRequest, State, WebSocketUpgrade},
+    extract::{FromRequest, State, WebSocketUpgrade, ws::WebSocket},
     handler::Handler,
 };
 
@@ -71,9 +71,17 @@ impl IntervalTimer {
     }
 
     #[inline]
-    pub fn log_iters_per_sec(&self, name: &str) {
+    pub async fn log_and_wait_fps(&self, name: &str, target: Duration) {
         let diff = self.base_time.elapsed();
         Metrics::push(name, diff.as_secs_f64() * 1000.);
+
+        if target > diff {
+            tokio::time::sleep(target - diff).await;
+            Metrics::push(
+                &format!("{name}+sleep"),
+                self.base_time.elapsed().as_secs_f64() * 1000.,
+            );
+        }
 
         // let fps = format!("{:.1}", 1. / diff.as_secs_f32());
         // let took = format!("{diff:.1?}");
@@ -139,7 +147,7 @@ impl Metrics {
     }
 
     pub fn with(f: impl FnOnce(&Self)) {
-        f(&*Self::lock_global())
+        f(&Self::lock_global())
     }
 }
 

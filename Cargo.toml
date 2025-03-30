@@ -1,5 +1,5 @@
 [workspace]
-members = [ "argus", "argus-sys", "cpp-interop",
+members = [ "argus", "argus-sys", "cam-loader", "cpp-interop",
     "smpgpu",
     "stitch",
     "stitching_server",

@@ -8,8 +8,8 @@ use v4l::{
 };
 
 use crate::{
-    loader::{Loader, OwnedWriteBuffer},
     Error, Result,
+    loader::{Loader, OwnedWriteBuffer},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

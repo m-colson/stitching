@@ -166,14 +166,13 @@ impl<'a> AsyncMemMapper<'a> {
     }
 }
 
+type BoxedAsyncViewCallback<'a> = Box<
+    dyn FnOnce(wgpu::BufferView<'a>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> + Send + 'a,
+>;
 struct AsyncMappingCallback<'a>(
     &'a wgpu::Buffer,
     wgpu::BufferSlice<'a>,
-    Box<
-        dyn FnOnce(wgpu::BufferView<'a>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
-            + Send
-            + 'a,
-    >,
+    BoxedAsyncViewCallback<'a>,
     kanal::OneshotReceiver<Result<(), wgpu::BufferAsyncError>>,
 );
 

@@ -1,14 +1,17 @@
 use std::{f32::consts::PI, path::PathBuf};
 
+use glam::Mat4;
 use render_gpu::Vertex;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::util::conv_deg_rad;
 
 #[cfg(feature = "gpu")]
 mod render_gpu;
 #[cfg(feature = "gpu")]
-pub use render_gpu::{DepthData, GpuDirectBufferWrite, GpuProjector, InverseView, TexturedVertex};
+pub use render_gpu::{
+    DepthData, GpuDirectBufferWrite, GpuProjector, InverseView, ProjectionView, TexturedVertex,
+};
 
 use crate::camera;
 
@@ -78,6 +81,76 @@ pub enum ViewStyle {
         fov_y: f32,
         frame_per_rev: f32,
     },
+}
+
+impl Default for ViewStyle {
+    fn default() -> Self {
+        Self::Orthographic {
+            pos: [0., 0., 100.],
+            radius: 100.,
+        }
+    }
+}
+
+impl ViewStyle {
+    pub fn transform_matrix(self, width: f32, height: f32) -> Mat4 {
+        let aspect = width / height;
+        match self {
+            ViewStyle::Orthographic {
+                pos: [x, y, _],
+                radius,
+            } => {
+                Mat4::orthographic_rh(
+                    radius.mul_add(-aspect, x),
+                    radius.mul_add(aspect, x),
+                    -radius + y,
+                    radius + y,
+                    0.1,
+                    1000.,
+                ) * Mat4::look_at_rh(
+                    glam::vec3(0., 0., 100.),
+                    glam::vec3(0., 0., 0.),
+                    glam::Vec3::Y,
+                )
+            }
+            ViewStyle::Perspective {
+                pos,
+                look_at,
+                fov_y,
+            } => {
+                Mat4::perspective_rh(fov_y, aspect, 0.1, 1000.)
+                    * Mat4::look_at_rh(pos.into(), look_at.into(), glam::Vec3::Z)
+            }
+            ViewStyle::Orbit {
+                dist,
+                theta,
+                z,
+                look_at,
+                fov_y,
+                frame_per_rev: _,
+            } => {
+                Mat4::perspective_rh(fov_y, aspect, 0.1, 1000.)
+                    * Mat4::look_at_rh(
+                        [theta.sin() * dist, -theta.cos() * dist, z].into(),
+                        look_at.into(),
+                        glam::Vec3::Z,
+                    )
+            }
+        }
+    }
+
+    pub fn perspective_info(&self) -> Option<([f32; 3], [f32; 3], f32)> {
+        if let Self::Perspective {
+            pos,
+            look_at,
+            fov_y,
+        } = self
+        {
+            Some((*pos, *look_at, fov_y.to_degrees()))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

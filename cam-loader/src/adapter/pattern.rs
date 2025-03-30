@@ -1,8 +1,8 @@
 use zerocopy::FromBytes;
 
 use crate::{
-    loader::{Loader, OwnedWriteBuffer},
     Result,
+    loader::{Loader, OwnedWriteBuffer},
 };
 
 use super::Config;
@@ -18,7 +18,9 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
     let [w, h] = spec.resolution;
 
     if w % grid_size != 0 {
-        return Err(crate::Error::Other(format!("invalid grid_size {grid_size} for resolution {w}*{h}. width must be a multiple of grid_size")));
+        return Err(crate::Error::Other(format!(
+            "invalid grid_size {grid_size} for resolution {w}*{h}. width must be a multiple of grid_size"
+        )));
     }
 
     Ok(Loader::new_blocking(w, h, CHANS, move |dest| {

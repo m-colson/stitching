@@ -1,10 +1,10 @@
 use crate::{
+    Buffer, FragTarget,
     bind::{AsBinding, BindResource},
     cmd::{
-        render::{ColorAttachment, DepthAttachment},
         CopyOp,
+        render::{ColorAttachment, DepthAttachment},
     },
-    Buffer, FragTarget,
 };
 
 pub struct Texture {
@@ -13,8 +13,8 @@ pub struct Texture {
 
 impl Texture {
     #[inline]
-    pub fn builder(dev: &impl AsRef<wgpu::Device>) -> TextureBuilder<'_> {
-        TextureBuilder::new(dev.as_ref())
+    pub fn builder<'a>(dev: &'a impl AsRef<wgpu::Device>, label: &'a str) -> TextureBuilder<'a> {
+        TextureBuilder::new(dev.as_ref(), Some(label))
     }
 
     #[must_use]
@@ -25,7 +25,7 @@ impl Texture {
 
     #[must_use]
     #[inline]
-    pub fn frag_target_format(&self) -> FragTarget {
+    pub fn as_frag_target(&self) -> FragTarget {
         FragTarget::new(self.inner.format())
     }
 
@@ -84,11 +84,10 @@ impl Texture {
     #[inline]
     pub fn new_staging(&self, dev: &impl AsRef<wgpu::Device>) -> Buffer {
         let size = self.size();
-        Buffer::builder(dev)
-            .label("texture_staging_buf")
+        Buffer::builder(dev, "texture_staging_buf")
             .size((size.width * size.height * size.depth_or_array_layers * 4) as _)
             .writable()
-            .build()
+            .build_untyped()
     }
 
     #[must_use]
@@ -156,10 +155,10 @@ pub struct TextureBuilder<'a> {
 impl<'a> TextureBuilder<'a> {
     #[must_use]
     #[inline]
-    pub const fn new(dev: &'a wgpu::Device) -> Self {
+    pub const fn new(dev: &'a wgpu::Device, label: Option<&'a str>) -> Self {
         Self {
             dev,
-            label: None,
+            label,
             width: 0,
             height: 0,
             layers: 1,

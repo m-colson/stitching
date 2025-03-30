@@ -1,34 +1,31 @@
 [package]
 name = "stitch"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [features]
-default = ["toml-cfg", "tokio", "live", "gpu"]
+default = ["toml-cfg", "gpu"]
 toml-cfg = ["dep:toml"]
-tokio = ["dep:tokio", "smpgpu/tokio_task_poller"]
-live = ["dep:zerocopy", "tokio", "tokio/rt"]
 gpu = ["dep:smpgpu", "dep:glam"]
 obj-file = ["smpgpu/obj-file"]
+v4l = ["cam-loader/v4l"]
+argus = ["cam-loader/argus"]
 
 [dependencies]
+cam-loader = { version = "0.1.0", path = "../cam-loader" }
 encase = { version = "0.10.0", features = ["glam"] }
-futures.workspace = true
 glam = { workspace = true, optional = true }
 image.workspace = true
 kanal.workspace = true
-mozjpeg = "0.10.12"
-# nokhwa = { workspace = true, optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
-smpgpu = { path = "../smpgpu", optional = true }
-thiserror.workspace = true
-tokio = { workspace = true, optional = true, features = ["sync"] }
-toml = { version = "0.8.19", optional = true, default-features=false, features=["parse"] }
-tracing.workspace = true
-v4l = "0.14.0"
-argus.path = "../argus"
-
-zerocopy = { version = "0.8.9", optional = true, features = [
-    "alloc",
-    "derive",
+smpgpu = { path = "../smpgpu", optional = true, features = [
+    "tokio_task_poller",
 ] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+toml = { version = "0.8.19", optional = true, default-features = false, features = [
+    "parse",
+] }
+tracing.workspace = true
+
+zerocopy = { version = "0.8.9", features = ["alloc", "derive"] }

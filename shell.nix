@@ -15,8 +15,11 @@ in with pkgs; mkShell {
         cmake
         libGL
         clang
+        llvmPackages_17.libclang.lib
         
-        rust-bin.stable.latest.default
+        (rust-bin.stable.latest.default.override {
+            extensions = ["rust-src"];
+        })
 
         unstablePkgs.rust-analyzer
     ] ++ xorgPkgs;
@@ -24,6 +27,7 @@ in with pkgs; mkShell {
     LD_LIBRARY_PATH = lib.makeLibraryPath ([
             vulkan-loader
             libGL
-            libclang
         ] ++ xorgPkgs);
+
+    LIBCLANG_PATH = "${llvmPackages_17.libclang.lib}/lib";
 }

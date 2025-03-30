@@ -3,9 +3,9 @@ use std::ops::{BitOr, Range};
 use encase::ShaderSize;
 
 use crate::{
-    shader::CompiledRenderShader,
-    typed_buffer::{IndexBuffer, IndexBufferFormat},
     VertexBuffer,
+    buffer::typed::{IndexBuffer, IndexBufferFormat},
+    shader::CompiledRenderShader,
 };
 
 use super::{Checkpoint, CheckpointBuilder, CheckpointItem, TypeOp};
@@ -127,7 +127,7 @@ impl<'a> CheckpointBuilder<'a, RenderCheckpointItem<'a>> {
     }
 
     #[inline]
-    pub fn frag_target(mut self, target: impl Into<wgpu::ColorTargetState>) -> Self {
+    pub fn target_format(mut self, target: impl Into<wgpu::ColorTargetState>) -> Self {
         self.data.frag_targets.push(Some(target.into()));
         self
     }

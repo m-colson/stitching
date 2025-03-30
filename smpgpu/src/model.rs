@@ -3,10 +3,11 @@ use std::borrow::Cow;
 use encase::{ShaderSize, ShaderType};
 
 use crate::{
-    cmd::CheckpointBuilder,
-    typed_buffer::{IndexBufferBuilder, IndexBufferFormat, UniformBuilder, VertexBufferBuilder},
     AsRenderItem, AutoVisBindable, IndexBuffer, RenderCheckpoint, RenderItem, Uniform,
     VertexBuffer,
+    buffer::{BufferBuilder, typed::IndexBufferFormat},
+    cmd::CheckpointBuilder,
+    global::checkpoint,
 };
 
 #[derive(ShaderType, Clone, Copy, Debug, PartialEq)]
@@ -20,7 +21,42 @@ pub struct VertPosNorm {
     pub norm: glam::Vec4,
 }
 
+#[derive(Clone, Debug)]
 pub struct Model<V, I: IndexBufferFormat> {
+    pub view: Uniform<glam::Mat4>,
+    pub verts: VertexBuffer<V>,
+    pub idx: IndexBuffer<I>,
+    pub idx_len: u32,
+}
+
+impl<V: Clone, I: IndexBufferFormat> Model<V, I> {
+    pub fn rend_with_cam_cp_global(
+        &self,
+        cam: &Uniform<glam::Mat4>,
+        f: impl FnOnce(CheckpointBuilder<'_>) -> RenderCheckpoint,
+    ) -> RendModel<V, I> {
+        let cp = f(checkpoint().group(self.view.in_vertex() & cam.in_vertex()));
+
+        RendModel {
+            view: self.view.clone(),
+            verts: self.verts.clone(),
+            idx: self.idx.clone(),
+            idx_len: self.idx_len as _,
+            cp,
+        }
+    }
+
+    pub fn set_view(&self, m: glam::Mat4) {
+        self.view.set_global(&m);
+    }
+
+    pub fn with_view(self, m: glam::Mat4) -> Self {
+        self.view.set_global(&m);
+        self
+    }
+}
+
+pub struct RendModel<V, I: IndexBufferFormat> {
     pub view: Uniform<glam::Mat4>,
     pub verts: VertexBuffer<V>,
     pub idx: IndexBuffer<I>,
@@ -28,7 +64,7 @@ pub struct Model<V, I: IndexBufferFormat> {
     pub cp: RenderCheckpoint,
 }
 
-impl<V: ShaderSize, I: IndexBufferFormat> Model<V, I> {
+impl<V: ShaderSize, I: IndexBufferFormat> RendModel<V, I> {
     #[inline]
     pub fn builder(dev: &impl AsRef<wgpu::Device>) -> ModelBuilder<'_, V, I>
     where
@@ -47,7 +83,7 @@ impl<V: ShaderSize, I: IndexBufferFormat> Model<V, I> {
     }
 }
 
-impl<V: ShaderSize, I: IndexBufferFormat> AsRenderItem for Model<V, I> {
+impl<V: ShaderSize, I: IndexBufferFormat> AsRenderItem for RendModel<V, I> {
     fn as_item(&self) -> RenderItem<'_> {
         self.cp
             .vert_buf(&self.verts)
@@ -80,27 +116,55 @@ impl<'a, V: ShaderSize + Clone, I: IndexBufferFormat> ModelBuilder<'a, V, I> {
         self
     }
 
+    pub fn build(self) -> Model<V, I> {
+        let view = BufferBuilder::new(self.dev, Some("view"))
+            .uniform()
+            .writable()
+            .init(&glam::Mat4::IDENTITY)
+            .build();
+
+        let verts = BufferBuilder::new(self.dev, Some("vertices"))
+            .vertex()
+            .init_data(&self.verts)
+            .build();
+        let idx_len = self.idxs.len();
+        let idx = BufferBuilder::new(self.dev, Some("indicies"))
+            .index()
+            .init_data(&self.idxs)
+            .build();
+
+        Model {
+            view,
+            verts,
+            idx,
+            idx_len: idx_len as _,
+        }
+    }
+
     pub fn cp_build_cam(
         self,
         cam: &Uniform<glam::Mat4>,
         f: impl FnOnce(CheckpointBuilder<'a>) -> RenderCheckpoint,
-    ) -> Model<V, I> {
-        let view = UniformBuilder::new(self.dev)
+    ) -> RendModel<V, I> {
+        let view = BufferBuilder::new(self.dev, Some("view"))
+            .uniform()
             .writable()
-            .init_data(&glam::Mat4::IDENTITY)
+            .init(&glam::Mat4::IDENTITY)
             .build();
 
-        let verts = VertexBufferBuilder::new(self.dev)
+        let verts = BufferBuilder::new(self.dev, Some("vertices"))
+            .vertex()
             .init_data(&self.verts)
             .build();
         let idx_len = self.idxs.len();
-        let idx = IndexBufferBuilder::new(self.dev)
+        let idx = BufferBuilder::new(self.dev, Some("indicies"))
+            .index()
             .init_data(&self.idxs)
             .build();
 
         let cp = f(CheckpointBuilder::new(self.dev).group(view.in_vertex() & cam.in_vertex()));
 
-        Model {
+        RendModel {
             view,
             verts,
             idx,
@@ -112,7 +176,7 @@ impl<'a, V: ShaderSize + Clone, I: IndexBufferFormat> ModelBuilder<'a, V, I> {
 
 impl<I> ModelBuilder<'_, VertPosNorm, I>
 where
-    I: crate::typed_buffer::IndexBufferFormat,
+    I: IndexBufferFormat,
     obj::Vertex: obj::FromRawVertex<I>,
 {
     #[cfg(feature = "obj-file")]
