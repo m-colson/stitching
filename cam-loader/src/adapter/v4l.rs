@@ -19,7 +19,7 @@ pub struct Config {
     pub controls: HashMap<String, i64>,
 }
 
-pub fn from_spec<B: OwnedWriteBuffer + 'static>(
+pub fn from_spec<B: OwnedWriteBuffer + Send + 'static>(
     cam_spec: &super::Config,
     Config { index, controls }: Config,
 ) -> Result<Loader<B>> {
@@ -124,7 +124,7 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
 }
 
 #[inline]
-fn new_jpeg_loader<B: OwnedWriteBuffer + 'static>(
+fn new_jpeg_loader<B: OwnedWriteBuffer + Send + 'static>(
     index: usize,
     width: u32,
     height: u32,

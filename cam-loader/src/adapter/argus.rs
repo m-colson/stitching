@@ -35,14 +35,14 @@ fn cam_provider() -> Arc<argus::CameraProvider> {
     out
 }
 
-pub fn from_spec<B: OwnedWriteBuffer + 'static>(
+pub fn from_spec<B: OwnedWriteBuffer + Send + 'static>(
     cam_spec: &super::Config,
     Config { index, mode }: Config,
 ) -> Loader<B> {
     let [w, h] = cam_spec.resolution;
     let fps = cam_spec.frame_rate.unwrap_or(30) as u64;
 
-    let handler = move |req_recv: kanal::Receiver<(B, kanal::OneshotSender<B>)>| -> Result<()> {
+    let handler = move |req_recv: kanal::Receiver<(B, kanal::Sender<B>)>| -> Result<()> {
         let provider = cam_provider();
         let iprovider = provider.as_interface();
 
