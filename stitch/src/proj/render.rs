@@ -229,23 +229,26 @@ impl Vertex {
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct TexturedVertex {
     pub pos: glam::Vec4,
+    pub color: glam::Vec4,
     pub text_coord: glam::Vec2,
 }
 
 impl TexturedVertex {
     #[inline]
-    pub const fn new(x: f32, y: f32, z: f32, tx: f32, ty: f32) -> Self {
+    pub fn new(x: f32, y: f32, z: f32, tx: f32, ty: f32, color: glam::Vec3) -> Self {
         Self {
             pos: glam::vec4(x, y, z, 1.),
             text_coord: glam::vec2(tx, ty),
+            color: color.extend(1.),
         }
     }
 
     #[inline]
-    pub const fn from_pos(pos: glam::Vec4, tx: f32, ty: f32) -> Self {
+    pub fn from_pos(pos: glam::Vec4, tx: f32, ty: f32, color: glam::Vec3) -> Self {
         Self {
             pos,
             text_coord: glam::vec2(tx, ty),
+            color: color.extend(1.),
         }
     }
 }
@@ -431,7 +434,7 @@ impl GpuProjector {
             .shader(smpgpu::include_shader!("shaders/bounds.wgsl"))
             .enable_depth()
             .vert_buffer_of::<TexturedVertex>(
-                &smpgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2],
+                &smpgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x2],
             )
             .target_format(rend_out.texture.as_frag_target().use_transparency())
             .build();
@@ -467,11 +470,10 @@ impl GpuProjector {
                         .then(rend_out.prepare())
                         .submit();
 
-                    let cpy_fut = MemMapper::new()
+                    MemMapper::new()
                         .copy(&rend_out.staging, v.as_mut())
-                        .run_all();
-                    force_global_wake();
-                    cpy_fut.await;
+                        .run_all()
+                        .await;
                 }
 
                 // if the receiver has been dropped, they don't want their buffer back!
@@ -551,12 +553,11 @@ impl GpuProjector {
                             .then(rend_out.prepare())
                             .submit();
 
-                        let cpy_fut = MemMapper::new()
+                        MemMapper::new()
                             .copy(&rend_out.staging, img.as_mut())
                             .copy(&depth_staging, depth_buf.as_mut())
-                            .run_all();
-                        force_global_wake();
-                        cpy_fut.await;
+                            .run_all()
+                            .await;
                     }
 
                     // if the receiver has been dropped, they don't want their buffer back!
@@ -621,11 +622,11 @@ pub struct ProjectionView<B> {
 }
 
 pub enum ProjUpdater {
-    View(Box<dyn FnOnce(&mut ViewStyle)>),
+    View(Box<dyn FnOnce(&mut ViewStyle) + Send>),
 }
 
 impl<B> ProjectionView<B> {
-    pub fn update_view(&self, f: impl FnOnce(&mut ViewStyle) + 'static) -> Result<()> {
+    pub fn update_view(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) -> Result<()> {
         self.update_send
             .send(ProjUpdater::View(Box::new(f)))
             .map_err(|_| Error::Other("projection view closed".to_string()))

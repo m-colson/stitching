@@ -16,7 +16,7 @@ pub enum InferError {
 pub type InferResult<T> = ::std::result::Result<T, InferError>;
 
 pub struct InferHost<H: InferHandler> {
-    ready_send: kanal::AsyncSender<kanal::OneshotAsyncSender<Vec<H::Item>>>,
+    ready_send: kanal::AsyncSender<kanal::AsyncSender<Vec<H::Item>>>,
 }
 
 impl<H: InferHandler> Clone for InferHost<H> {
@@ -34,8 +34,7 @@ where
     pub fn spawn(handlers: impl IntoIterator<Item = H> + Send + 'static) -> InferResult<Self> {
         let which = Which::best();
 
-        let (ready_send, ready_recv) =
-            kanal::bounded_async::<kanal::OneshotAsyncSender<Vec<H::Item>>>(4);
+        let (ready_send, ready_recv) = kanal::bounded_async::<kanal::AsyncSender<Vec<H::Item>>>(4);
 
         tokio::spawn(async move {
             let mut in_bufs = handlers
@@ -144,7 +143,7 @@ where
     // }
 
     pub async fn req_infer(&self) -> Vec<H::Item> {
-        let (resp_send, resp) = kanal::oneshot_async();
+        let (resp_send, resp) = kanal::bounded_async(1);
 
         if let Err(err) = self.ready_send.send(resp_send).await {
             tracing::error!("error requesting infer: {err}")

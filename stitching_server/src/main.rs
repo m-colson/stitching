@@ -14,7 +14,7 @@ mod util;
 #[tokio::main]
 pub async fn main() {
     log::initialize(format!(
-        "{}=debug,tower_http=debug,stitch=debug,smpgpu=debug",
+        "{}=debug,tower_http=debug,stitch=debug,smpgpu=debug,cam_loader=debug",
         env!("CARGO_CRATE_NAME")
     ));
 
@@ -109,4 +109,5 @@ pub enum ArgCommand {
     },
     /// Capture a raw image from every configured cameras and save them as capture*.png
     CaptureLive,
+    // SimMasks,
 }

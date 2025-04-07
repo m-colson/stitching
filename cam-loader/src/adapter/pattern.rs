@@ -7,7 +7,7 @@ use crate::{
 
 use super::Config;
 
-pub fn from_spec<B: OwnedWriteBuffer + 'static>(
+pub fn from_spec<B: OwnedWriteBuffer + Send + 'static>(
     spec: &Config,
     color: [u8; 3],
     grid_size: u32,

@@ -3,6 +3,9 @@ name = "argus-sys"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+build = []
+
 [dependencies]
 cpp-interop = { version = "0.1.0", path = "../cpp-interop" }
 

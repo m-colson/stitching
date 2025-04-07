@@ -5,6 +5,7 @@
   <title>CASA Viewer - Camera for Situation Awareness</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="/style.css">
+  <script src="/qoi.js"></script>
   <script>
     class ProjectionView extends HTMLCanvasElement {
       /**@type WebSocket*/
@@ -27,7 +28,7 @@
 
       connectedCallback() {
         this.conn = new WebSocket("/video");
-        this.conn.binaryType = "blob";
+        this.conn.binaryType = "arraybuffer";
         this.conn.addEventListener("message", this.handleMessage.bind(this));
         this.conn.addEventListener("close", this.handleClose.bind(this));
 
@@ -52,13 +53,14 @@
        * @param {MessageEvent<any>} ev
        */
       async handleMessage(ev) {
-        if (ev.data instanceof Blob) {
-          let decompressed = ev.data.stream().pipeThrough(new DecompressionStream("gzip"));
-          let data = await new Response(decompressed).arrayBuffer();
-          let serverSend = new Float64Array(data.slice(8, 16))[0];
+        if (ev.data instanceof ArrayBuffer) {
+          let serverSend = new Float64Array(ev.data.slice(8, 16))[0];
           let clientRecv = performance.now();
 
-          this.videoData.data.set(new Uint8Array(data.slice(16)));
+          let encodedImg = ev.data.slice(16);
+          let rawImg = QOI.decode(encodedImg);
+
+          this.videoData.data.set(rawImg.data);
           this.videoCtx.putImageData(this.videoData, 0, 0);
           this.syncView();
 

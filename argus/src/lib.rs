@@ -104,7 +104,7 @@ pub struct ICameraProperties<'a>(
     PhantomData<&'a CameraDevice>,
 );
 
-impl<'a> ICameraProperties<'a> {
+impl ICameraProperties<'_> {
     pub fn get_all_sensor_modes(&self) -> Result<Vec<SensorMode>> {
         let mut out_vec = CppVector::new();
         unsafe { self.0.as_ref().unwrap().get_all_sensor_modes(&mut out_vec) }.ok()?;
@@ -688,7 +688,7 @@ impl IImageNativeBuffer<'_> {
                 size.into(),
                 format,
                 layout,
-                std::mem::transmute(rotation_90s),
+                std::mem::transmute::<u32, argus_sys::Rotation>(rotation_90s),
                 &mut status,
             );
             status.ok()?;

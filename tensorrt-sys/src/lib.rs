@@ -1,6 +1,14 @@
-pub(crate) mod autobind {
+pub(crate) mod bind {
     #![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]
+
+    #[cfg(feature = "build")]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+    #[cfg(not(feature = "build"))]
+    pub(crate) mod generated;
+    #[cfg(not(feature = "build"))]
+    pub use generated::*;
+
     pub use root::nvinfer1::*;
     pub use root::nvonnxparser;
 
@@ -30,7 +38,7 @@ use std::ffi::CStr;
 use root::cudaStream_t;
 pub use vtables::*;
 
-pub use autobind::*;
+pub use bind::*;
 
 #[derive(Debug)]
 pub struct CudaError(root::cudaError);

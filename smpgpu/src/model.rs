@@ -192,14 +192,14 @@ where
             .collect::<Vec<_>>()
             .into();
 
-        // let (cmin, cmax) = self.verts.iter().fold(
-        //     (
-        //         glam::vec4(f32::MAX, f32::MAX, f32::MAX, 1.),
-        //         glam::vec4(f32::MIN, f32::MIN, f32::MIN, 1.),
-        //     ),
-        //     |(cmin, cmax), v| (v.pos.min(cmin), v.pos.max(cmax)),
-        // );
-        // println!("model has min {cmin:?} and max {cmax:?}");
+        let (cmin, cmax) = self.verts.iter().fold(
+            (
+                glam::vec4(f32::MAX, f32::MAX, f32::MAX, 1.),
+                glam::vec4(f32::MIN, f32::MIN, f32::MIN, 1.),
+            ),
+            |(cmin, cmax), v| (v.pos.min(cmin), v.pos.max(cmax)),
+        );
+        println!("model has min {cmin:?} and max {cmax:?}");
 
         self.idxs = obj.indices.into();
         self

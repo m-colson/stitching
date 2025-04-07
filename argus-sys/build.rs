@@ -34,8 +34,14 @@ fn configuration() {
 
 #[cfg(target_os = "linux")]
 fn main() {
-    use std::path::PathBuf;
+    #[cfg(feature = "build")]
+    build_header();
 
+    configuration();
+}
+
+#[allow(dead_code)]
+fn build_header() {
     let bindings = bindgen::Builder::default()
         .header("wrapper.hpp")
         .allowlist_recursively(false)
@@ -142,8 +148,8 @@ fn main() {
         .expect("failed to generate bindings");
 
     bindings
-        .write_to_file(PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("bindings.rs"))
+        .write_to_file(
+            std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("bindings.rs"),
+        )
         .expect("failed to write bindings");
-
-    configuration();
 }

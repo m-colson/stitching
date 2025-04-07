@@ -1,10 +1,3 @@
-use std::path::PathBuf;
-
-// #[cfg(target_os = "windows")]
-// const CUDA_ROOT: &str = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/";
-// #[cfg(target_os = "linux")]
-// const CUDA_ROOT: &str = "/usr/local/cuda-12.6/";
-
 #[cfg(target_os = "windows")]
 const CUDA_BIN: &str = "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6/bin";
 #[cfg(target_os = "linux")]
@@ -44,6 +37,16 @@ fn cuda_configuration() {
 }
 
 fn main() {
+    #[cfg(feature = "build")]
+    build_header();
+
+    configuration();
+}
+
+#[allow(dead_code)]
+fn build_header() {
+    use std::path::PathBuf;
+
     let bindings = bindgen::Builder::default()
         .header("wrapper.hpp")
         .impl_debug(true)
@@ -83,6 +86,4 @@ fn main() {
     bindings
         .write_to_file(PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("bindings.rs"))
         .expect("failed to write bindings");
-
-    configuration();
 }

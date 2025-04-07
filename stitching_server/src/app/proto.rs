@@ -1,5 +1,4 @@
 use std::{
-    io::{Cursor, Read},
     ops::{Deref, DerefMut},
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
@@ -103,12 +102,24 @@ impl VideoPacket {
     #[inline]
     pub fn to_message(&self) -> tokio::task::JoinHandle<Message> {
         let buf = self.0.clone();
+        let w = self.width();
+        let h = self.height();
         tokio::task::spawn_blocking(move || {
-            let mut out = Vec::new();
-            flate2::GzBuilder::new()
-                .buf_read(Cursor::new(&buf), flate2::Compression::fast())
-                .read_to_end(&mut out)
-                .expect("failed to compress video packet");
+            let Ok(enc) = qoi::Encoder::new(&buf[16..], w as _, h as _)
+                .inspect_err(|err| tracing::error!("failed to create encoder: {err}"))
+            else {
+                return Message::Binary(vec![0].into());
+            };
+
+            // NOTE: the actual size of this buffer is unknown so this is arbitrary.
+            let mut out = vec![0; 16 + enc.required_buf_len()];
+            out[0..16].copy_from_slice(&buf[0..16]);
+
+            let usage = enc
+                .encode_to_buf(&mut out[16..])
+                .expect("should only happen when buf is too small, but we ensured it was");
+
+            out.truncate(16 + usage);
 
             Message::Binary(out.into())
         })

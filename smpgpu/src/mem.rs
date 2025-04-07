@@ -1,5 +1,7 @@
 use std::{future::Future, pin::Pin};
 
+use crate::global::force_wake;
+
 #[derive(Default)]
 pub struct MemMapper<'a> {
     chans: Vec<MappingCallback<'a>>,
@@ -42,7 +44,10 @@ impl<'a> MemMapper<'a> {
 
     #[inline]
     pub async fn run_all(self) {
-        futures::future::join_all(self.chans.into_iter().map(MappingCallback::wait_async)).await;
+        let fut =
+            futures::future::join_all(self.chans.into_iter().map(MappingCallback::wait_async));
+        force_wake();
+        fut.await;
     }
 
     #[inline]
@@ -57,7 +62,7 @@ struct MappingCallback<'a>(
     &'a wgpu::Buffer,
     wgpu::BufferSlice<'a>,
     Box<dyn FnOnce(wgpu::BufferView<'a>) + Send + 'a>,
-    kanal::OneshotReceiver<Result<(), wgpu::BufferAsyncError>>,
+    kanal::Receiver<Result<(), wgpu::BufferAsyncError>>,
 );
 
 impl<'a> MappingCallback<'a> {
@@ -65,7 +70,7 @@ impl<'a> MappingCallback<'a> {
         b: &'a wgpu::Buffer,
         cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
     ) -> Self {
-        let (res_send, res_recv) = kanal::oneshot();
+        let (res_send, res_recv) = kanal::bounded(1);
         let bs = b.slice(..);
         bs.map_async(wgpu::MapMode::Read, move |v| {
             // if this send fails, the user must have dropped the callback,
@@ -79,7 +84,7 @@ impl<'a> MappingCallback<'a> {
         b: &'a wgpu::Buffer,
         cb: impl FnOnce(wgpu::BufferView<'a>) + Send + 'a,
     ) -> Self {
-        let (res_send, res_recv) = kanal::oneshot();
+        let (res_send, res_recv) = kanal::bounded(1);
         let bs = b.slice(..);
         bs.map_async(wgpu::MapMode::Write, move |v| {
             // if this send fails, the user must have dropped the callback,
@@ -173,7 +178,7 @@ struct AsyncMappingCallback<'a>(
     &'a wgpu::Buffer,
     wgpu::BufferSlice<'a>,
     BoxedAsyncViewCallback<'a>,
-    kanal::OneshotReceiver<Result<(), wgpu::BufferAsyncError>>,
+    kanal::Receiver<Result<(), wgpu::BufferAsyncError>>,
 );
 
 impl<'a> AsyncMappingCallback<'a> {
@@ -181,7 +186,7 @@ impl<'a> AsyncMappingCallback<'a> {
         b: &'a wgpu::Buffer,
         cb: impl FnOnce(wgpu::BufferView<'a>) -> F + Send + 'a,
     ) -> Self {
-        let (res_send, res_recv) = kanal::oneshot();
+        let (res_send, res_recv) = kanal::bounded(1);
         let bs = b.slice(..);
         bs.map_async(wgpu::MapMode::Read, move |v| {
             // if this send fails, the user must have dropped the callback,
@@ -195,7 +200,7 @@ impl<'a> AsyncMappingCallback<'a> {
         b: &'a wgpu::Buffer,
         cb: impl FnOnce(wgpu::BufferView<'a>) -> F + Send + 'a,
     ) -> Self {
-        let (res_send, res_recv) = kanal::oneshot();
+        let (res_send, res_recv) = kanal::bounded(1);
         let bs = b.slice(..);
         bs.map_async(wgpu::MapMode::Write, move |v| {
             // if this send fails, the user must have dropped the callback,
@@ -218,9 +223,7 @@ impl AsyncMappingCallback<'_> {
     }
 }
 
-fn mapping_failed(
-    res: Result<Result<(), wgpu::BufferAsyncError>, kanal::OneshotReceiveError>,
-) -> bool {
+fn mapping_failed(res: Result<Result<(), wgpu::BufferAsyncError>, kanal::ReceiveError>) -> bool {
     let Ok(res) = res else {
         #[cfg(feature = "tracing")]
         tracing::error!("failed to receive confirmation of mapping operation");

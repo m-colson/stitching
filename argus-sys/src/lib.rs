@@ -1,11 +1,20 @@
-mod autobind {
+#![allow(clippy::missing_safety_doc)]
+
+mod bind {
     #![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]
+
+    #[cfg(feature = "build")]
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+    #[cfg(not(feature = "build"))]
+    pub mod generated;
+    #[cfg(not(feature = "build"))]
+    pub use generated::*;
 }
 
 use std::ffi;
 
-pub use autobind::root::{
+pub use bind::root::{
     Argus::{
         AcRegion, AeAntibandingMode, AeFlickerState, AeMode, AeState, AfMode, AutoControlId,
         AwbMode, AwbState, BayerPhase, Buffer, BufferSettings, BufferType, CVOutput, CameraDevice,

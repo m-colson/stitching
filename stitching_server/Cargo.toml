@@ -45,8 +45,11 @@ tensorrt = { version = "0.1.0", path = "../tensorrt", features = [
     "tracing",
 ], optional = true }
 zerocopy = { version = "0.8.9", features = ["alloc"] }
-flate2 = "1.0.35"
+flate2 = { version = "1.0.35", default-features = false, features = [
+    "zlib-rs",
+] }
 cam-loader = { version = "0.1.0", path = "../cam-loader" }
+qoi = "0.4.1"
 
 [dependencies.stitch]
 path = "../stitch"

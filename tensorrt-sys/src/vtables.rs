@@ -2,7 +2,7 @@ use root::cudaEvent_t;
 
 use cpp_interop::DestructorVEntry;
 
-use crate::{autobind::apiv::*, autobind::*, root::cudaStream_t};
+use crate::{bind::apiv::*, bind::*, root::cudaStream_t};
 
 #[repr(C)]
 pub struct ILoggerVTable {

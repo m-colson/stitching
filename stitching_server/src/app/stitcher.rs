@@ -92,11 +92,12 @@ impl Sticher {
 
             let bound_update_send = update_send.clone_async();
             tokio::spawn(async move {
+                let mut timer = IntervalTimer::new();
                 loop {
+                    timer.start();
+
                     let vertices = inferer.req_infer().await;
                     let vertices = vertices.into_iter().flatten().collect();
-
-                    // println!("verts: {:?}", vertices);
 
                     // if this fails, the stitcher has probably exited and we also need exit
                     if let Err(err) = bound_update_send.send(Update::Bounds(vertices)).await {
@@ -105,6 +106,8 @@ impl Sticher {
                         );
                         return;
                     }
+
+                    timer.mark_from_base("bound-loop");
                 }
             });
         };
@@ -151,6 +154,7 @@ pub struct InferView {
     proj: ProjectionView<(Vec<u8>, Vec<u8>)>,
     tmp_img: Option<Vec<u8>>,
     tmp_depth: Option<Vec<u8>>,
+    cutoff_width: f32,
 }
 
 impl InferView {
@@ -160,6 +164,7 @@ impl InferView {
             proj,
             tmp_img: None,
             tmp_depth: None,
+            cutoff_width: 25.5,
         }
     }
 }
@@ -209,6 +214,9 @@ impl crate::infer_host::InferHandler for InferView {
         bounds: Vec<crate::infer_host::BoundingClass>,
         depth: &DepthData<'_>,
     ) -> Self::Item {
+        const WARN_COLOR: glam::Vec3 = glam::vec3(1.0, 1.0, 0.1);
+        const ALERT_COLOR: glam::Vec3 = glam::vec3(1.0, 0.1, 0.1);
+
         let mut vertices = Vec::new();
 
         let inv_mat = self.view.transform_matrix(640., 640.).inverse();
@@ -216,24 +224,35 @@ impl crate::infer_host::InferHandler for InferView {
         for bb in bounds {
             let lt_depth = depth.at(bb.xmin() as _, bb.ymin() as _);
             let rt_depth = depth.at(bb.xmax() as _, bb.ymin() as _);
-            // let rb_depth = depth.at(bb.xmin() as _, bb.ymax() as _);
-            // let lb_depth = depth.at(bb.xmax() as _, bb.ymax() as _);
 
-            let sbb = bb.rescale(640., 640., 2., 2.);
-            let lt = inv_mat * glam::vec4(sbb.xmin() - 1., -(sbb.ymin() - 1.), lt_depth, 1.);
-            let lt = TexturedVertex::from_pos(lt / lt.w, -1., -1.);
+            let ((xmin, ymin), (xmax, ymax)) = bb.rescale(640., 640., 2., 2.).corners();
 
-            let rt = inv_mat * glam::vec4(sbb.xmax() - 1., -(sbb.ymin() - 1.), rt_depth, 1.);
-            let rt = TexturedVertex::from_pos(rt / rt.w, 1., -1.);
+            let corners = [
+                (xmin, ymin, lt_depth),
+                (xmax, ymin, rt_depth),
+                (xmin, ymax, lt_depth),
+                (xmax, ymax, rt_depth),
+            ]
+            .map(|(x, y, z)| {
+                let p = inv_mat * glam::vec4(x - 1., -(y - 1.), z, 1.);
+                p / p.w
+            });
 
-            let lb = inv_mat * glam::vec4(sbb.xmin() - 1., -(sbb.ymax() - 1.), lt_depth, 1.);
-            let lb = TexturedVertex::from_pos(lb / lb.w, -1., 1.);
+            let coord_unsafe = corners
+                .into_iter()
+                .any(|c| c.x.abs() < self.cutoff_width && c.y > 0.0);
+            let color = if coord_unsafe {
+                ALERT_COLOR
+            } else {
+                WARN_COLOR
+            };
 
-            let rb = inv_mat * glam::vec4(sbb.xmax() - 1., -(sbb.ymax() - 1.), rt_depth, 1.);
-            let rb = TexturedVertex::from_pos(rb / rb.w, 1., 1.);
+            let lt = TexturedVertex::from_pos(corners[0], -1., -1., color);
+            let rt = TexturedVertex::from_pos(corners[1], 1., -1., color);
+            let lb = TexturedVertex::from_pos(corners[2], -1., 1., color);
+            let rb = TexturedVertex::from_pos(corners[3], 1., 1., color);
 
             vertices.extend([rt, lt, lb, lb, rb, rt]);
-            // tracing::info!("{n} {rt:?}: {bb}");
         }
 
         vertices
@@ -249,7 +268,7 @@ struct SticherInner<B: OwnedWriteBuffer> {
     pub cams: Vec<Camera<Loader<B>>>,
 }
 
-impl<B: OwnedWriteBuffer + 'static> SticherInner<B> {
+impl<B: OwnedWriteBuffer + Send + 'static> SticherInner<B> {
     pub fn from_cfg(
         cfg: &proj::Config<cam_loader::Config>,
         proj_size: (usize, usize),

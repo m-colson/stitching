@@ -114,7 +114,7 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
                                 tracing::warn!("failed to read from argus {index} : {err:?}")
                             })
                     } else {
-                        tracing::error!("attempted to copy zero bytes, ignoring...");
+                        tracing::warn!("attempted to copy zero bytes, ignoring...");
                     }
 
                     // if the receiver has been dropped, they don't want their buffer back!
@@ -123,10 +123,10 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
                 Err(err) => {
                     match err {
                         kanal::ReceiveError::SendClosed => {
-                            tracing::warn!("loader exiting because all senders have dropped")
+                            tracing::warn!("argus loader exiting because all senders have dropped")
                         }
                         kanal::ReceiveError::Closed => {
-                            tracing::warn!("loader exiting bacause it was closed")
+                            tracing::warn!("argus loader exiting bacause it was closed")
                         }
                     }
                     break;

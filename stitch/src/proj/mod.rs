@@ -1,15 +1,15 @@
 use std::{f32::consts::PI, path::PathBuf};
 
 use glam::Mat4;
-use render_gpu::Vertex;
+use render::Vertex;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::util::conv_deg_rad;
 
 #[cfg(feature = "gpu")]
-mod render_gpu;
+mod render;
 #[cfg(feature = "gpu")]
-pub use render_gpu::{
+pub use render::{
     DepthData, GpuDirectBufferWrite, GpuProjector, InverseView, ProjectionView, TexturedVertex,
 };
 

@@ -1,3 +1,5 @@
+use futures::future::join_all;
+
 use crate::{Error, Result, buf::FrameSize, util::log_recv_err};
 
 pub trait OwnedWriteBuffer {
@@ -47,13 +49,13 @@ impl<B1: OwnedWritable, B2: OwnedWritable> OwnedWritable for (B1, B2) {
 
 #[derive(Clone, Debug)]
 pub struct Loader<B> {
-    req_send: kanal::Sender<(B, kanal::OneshotSender<B>)>,
+    req_send: kanal::Sender<(B, kanal::Sender<B>)>,
     width: u32,
     height: u32,
     chans: u32,
 }
 
-impl<B: OwnedWriteBuffer + 'static> Loader<B> {
+impl<B: OwnedWriteBuffer + Send + 'static> Loader<B> {
     pub fn new_blocking(
         width: u32,
         height: u32,
@@ -75,9 +77,9 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
         width: u32,
         height: u32,
         chans: u32,
-        cb: impl FnOnce(kanal::Receiver<(B, kanal::OneshotSender<B>)>) + Send + 'static,
+        cb: impl FnOnce(kanal::Receiver<(B, kanal::Sender<B>)>) + Send + 'static,
     ) -> Self {
-        let (req_send, req_recv) = kanal::bounded::<(B, kanal::OneshotSender<B>)>(4);
+        let (req_send, req_recv) = kanal::bounded::<(B, kanal::Sender<B>)>(4);
 
         tokio::task::spawn_blocking(move || cb(req_recv));
 
@@ -92,7 +94,7 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
     /// # Errors
     /// loader doesn't exist anymore
     pub fn give(&self, buf: B) -> Result<Ticket<B>> {
-        let (buf_send, buf_recv) = kanal::oneshot();
+        let (buf_send, buf_recv) = kanal::bounded(1);
         self.req_send
             .send((buf, buf_send))
             .map_err(|_| Error::BufferLost)
@@ -102,7 +104,7 @@ impl<B: OwnedWriteBuffer + 'static> Loader<B> {
 
 impl<B1: OwnedWriteBuffer + 'static, B2: OwnedWriteBuffer + 'static> Loader<(B1, B2)> {
     pub fn give2(&self, buf1: B1, buf2: B2) -> Result<Ticket<(B1, B2)>> {
-        let (buf_send, buf_recv) = kanal::oneshot();
+        let (buf_send, buf_recv) = kanal::bounded(1);
         self.req_send
             .send(((buf1, buf2), buf_send))
             .map_err(|_| Error::BufferLost)
@@ -138,12 +140,12 @@ where
         width: u32,
         height: u32,
         chans: u32,
-        cb: impl FnOnce(kanal::AsyncReceiver<(B, kanal::OneshotSender<B>)>) -> F,
+        cb: impl FnOnce(kanal::AsyncReceiver<(B, kanal::Sender<B>)>) -> F,
     ) -> Self
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let (req_send, req_recv) = kanal::bounded::<(B, kanal::OneshotSender<B>)>(4);
+        let (req_send, req_recv) = kanal::bounded::<(B, kanal::Sender<B>)>(4);
 
         tokio::task::spawn(cb(req_recv.to_async()));
 
@@ -176,9 +178,10 @@ pub async fn collect_mapped_tickets<B: OwnedWriteBuffer + Send, K: Sync, T: Fram
 
 #[inline]
 pub async fn discard_tickets<B: OwnedWriteBuffer + Send>(tickets: Vec<Ticket<B>>) {
-    for ticket in tickets {
+    join_all(tickets.into_iter().map(|ticket| async move {
         _ = ticket.take().await;
-    }
+    }))
+    .await;
 }
 
 #[inline]
@@ -188,7 +191,7 @@ pub fn block_discard_tickets<B: OwnedWriteBuffer>(tickets: Vec<Ticket<B>>) {
     }
 }
 
-pub struct Ticket<R>(kanal::OneshotReceiver<R>);
+pub struct Ticket<R>(kanal::Receiver<R>);
 
 impl<R> Ticket<R> {
     /// # Errors

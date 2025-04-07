@@ -38,7 +38,7 @@ fn default_grid_size() -> u32 {
     16
 }
 
-impl<B: OwnedWriteBuffer + 'static> TryFrom<Config> for Loader<B> {
+impl<B: OwnedWriteBuffer + Send + 'static> TryFrom<Config> for Loader<B> {
     type Error = Error;
 
     fn try_from(spec: Config) -> Result<Self> {

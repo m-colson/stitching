@@ -101,7 +101,7 @@ pub fn from_spec<B: OwnedWriteBuffer + 'static>(
         .map_err(Error::io_ctx(format!("updating camera {index} format")))?;
 
     let mut stream = Stream::with_buffers(&device, v4l::buffer::Type::VideoCapture, 2)
-        .map_err(Error::io_ctx(format!("create camera {index} stream")))?;
+        .map_err(Error::io_ctx(format!("creating camera {index} stream")))?;
     stream.set_timeout(std::time::Duration::from_millis(1000));
 
     stream.next().map_err(Error::io_ctx(format!(
