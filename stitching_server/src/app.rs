@@ -39,7 +39,9 @@ impl App {
                 "stitching_server/assets",
             )))
             .route("/video", get(ws_upgrader(video::conn_state_machine)))
-            .route("/set/view/{id}", put(set_view_handler))
+            .route("/settings/view/{id}", put(set_view_handler))
+            .route("/settings/min-iou/{id}", put(set_min_iou_handler))
+            .route("/settings/min-score/{id}", put(set_min_score_handler))
             .layer(log::http_trace_layer())
             .with_state(self)
     }
@@ -86,9 +88,18 @@ impl App {
         self.0.stitcher.update_proj_style(f);
     }
 
-    #[allow(dead_code)]
     pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
         self.0.stitcher.update_view_style(f);
+    }
+
+    pub fn set_min_iou(&self, v: f32) {
+        #[cfg(feature = "trt")]
+        self.0.stitcher.set_min_iou(v);
+    }
+
+    pub fn set_min_score(&self, v: f32) {
+        #[cfg(feature = "trt")]
+        self.0.stitcher.set_min_score(v);
     }
 }
 
@@ -124,6 +135,16 @@ async fn set_view_handler(State(app): State<App>, p: extract::Path<i32>) {
     };
 
     app.update_view_style(move |s| *s = new_style);
+}
+
+#[cfg(feature = "trt")]
+async fn set_min_iou_handler(State(app): State<App>, p: extract::Path<f32>) {
+    app.set_min_iou(p.0);
+}
+
+#[cfg(feature = "trt")]
+async fn set_min_score_handler(State(app): State<App>, p: extract::Path<f32>) {
+    app.set_min_score(p.0);
 }
 
 impl AppInner {

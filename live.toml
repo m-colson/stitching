@@ -1,9 +1,8 @@
 [world.cylinder]
 radius = 70
+# height = 150
 
 [model]
-# path = "stitching_server/assets/whole_plane.obj"
-# origin = [0, 0, 0]
 path = "assets/plane_v6.obj"
 origin = [17.1586177, -5.239844, 3.0231295]
 scale = [0.1, 0.1, 0.1]                     # obj file is in mm
@@ -16,7 +15,7 @@ light_dir = [1, 1, -0.5]
 
 # [view.perspective]
 # fov_y = 80
-# pos = [0, -19.38, 27.36]
+# pos = [30, -10, 25]
 # look_at = [0, 0, 16]
 
 [view.orbit]
@@ -31,9 +30,9 @@ frame_per_rev = 500
 [[cameras]]
 pos = [0, -3.358, 5.211]
 pitch = 32.66
-azimuth = 0
+azimuth = -3
 roll = 0
-sensor = { img_off = [0, 40.4], fov.W = 175.6 }
+sensor = { img_off = [0, 40], fov.D = 175.6 }
 lens = "equisolid"
 resolution = [1920, 1080]
 framerate = 30
@@ -42,13 +41,14 @@ mask_path = "assets/bottom-mask.png"
 
 v4l.index = 6
 # pattern.color = [255, 40, 150]
+image = "capture0.png"
 
 [[cameras]]
 pos = [0, -18.157, 26.642]
 pitch = 25
-azimuth = -3.62
-roll = -1.27
-sensor = { img_off = [0, 40.4], fov.D = 175.6 }
+azimuth = -3
+roll = -1
+sensor = { img_off = [0, 55], fov.D = 175.6 }
 lens = "equisolid"
 resolution = [1920, 1080]
 framerate = 30
@@ -57,13 +57,14 @@ mask_path = "assets/tail-mask.png"
 
 v4l.index = 2
 # pattern.color = [255, 90, 60]
+image = "capture1.png"
 
 [[cameras]]
-pos = [-5.389, -11.451, 13.626]
+pos = [-5.348, -11.422, 13.626]
 pitch = 0
 azimuth = -125
-roll = 180
-sensor = { img_off = [35.47, 18.97], fov.D = 159.36 }
+roll = 181
+sensor = { img_off = [-50, 10], fov.D = 160 }
 lens = "equisolid"
 resolution = [1920, 1442]
 framerate = 21
@@ -72,13 +73,14 @@ mask_path = "assets/left-mask.png"
 
 argus = { index = 0, mode = 0 }
 # pattern.color = [0, 255, 0]
+image = "capture2.png"
 
 [[cameras]]
-pos = [5.389, -11.451, 13.625]
-pitch = 0
+pos = [5.348, -11.422, 13.625]
+pitch = 1
 azimuth = 125
 roll = 180
-sensor = { img_off = [-1.62, -0.96], fov.D = 159.36 }
+sensor = { img_off = [-40, 10], fov.D = 160 }
 lens = "equisolid"
 resolution = [1920, 1442]
 framerate = 21
@@ -87,34 +89,4 @@ mask_path = "assets/right-mask.png"
 
 argus = { index = 1, mode = 0 }
 # pattern.color = [0, 0, 255]
-
-
-# [[cameras]]
-# pos = [-5.3, -11.85, 13.63]
-# pitch = -1.71
-# azimuth = -115.72
-# roll = 180
-# sensor = { img_off = [35.47, 18.97], fov.D = 159.36 }
-# lens = "equisolid"
-# resolution = [1920, 1442]
-# framerate = 21
-
-# mask_path = "assets/left-mask.png"
-
-# argus = { index = 0, mode = 0 }
-# # pattern.color = [0, 255, 0]
-
-# [[cameras]]
-# pos = [5.3, -11.85, 13.63]
-# pitch = 1.71
-# azimuth = 111.38
-# roll = 180
-# sensor = { img_off = [-1.62, -0.96], fov.D = 159.36 }
-# lens = "equisolid"
-# resolution = [1920, 1442]
-# framerate = 21
-
-# mask_path = "assets/right-mask.png"
-
-# argus = { index = 1, mode = 0 }
-# # pattern.color = [0, 0, 255]
+image = "capture3.png"

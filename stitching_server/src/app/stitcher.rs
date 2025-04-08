@@ -17,15 +17,24 @@ use crate::util::IntervalTimer;
 use crate::infer_host::InferHost;
 
 use super::proto::VideoPacket;
-pub enum Update {
+pub enum StitchUpdate {
     ProjStyle(Box<dyn FnOnce(&mut ProjectionStyle) + Send>),
     ViewStyle(Box<dyn FnOnce(&mut ViewStyle) + Send>),
     Bounds(Vec<TexturedVertex>),
 }
 
+#[cfg(feature = "trt")]
+pub enum InferUpdate {
+    MinIOU(f32),
+    MinScore(f32),
+}
+
 pub struct Sticher {
     msg_recv: kanal::AsyncReceiver<Message>,
-    update_send: kanal::Sender<Update>,
+    stitch_update_send: kanal::Sender<StitchUpdate>,
+
+    #[cfg(feature = "trt")]
+    infer_update_send: kanal::Sender<InferUpdate>,
 }
 
 impl Sticher {
@@ -68,7 +77,9 @@ impl Sticher {
         let (update_send, update_recv) = kanal::bounded(4);
 
         #[cfg(feature = "trt")]
-        {
+        let infer_update_send = {
+            let (infer_update_send, infer_updates) = kanal::unbounded::<InferUpdate>();
+
             let rm = 2. * PI / num_subs as f32;
             const SUB_HEIGHT: f32 = 10.;
 
@@ -91,16 +102,31 @@ impl Sticher {
             let inferer = InferHost::spawn(subs).expect("failed to create infer host");
 
             let bound_update_send = update_send.clone_async();
+            // infer probing task
             tokio::spawn(async move {
+                let mut min_iou = 0.75;
+                let mut min_score = 0.5;
+
                 let mut timer = IntervalTimer::new();
-                loop {
+                while !infer_updates.is_disconnected() {
+                    while let Ok(Some(upd)) = infer_updates.try_recv() {
+                        match upd {
+                            InferUpdate::MinIOU(v) => min_iou = v,
+                            InferUpdate::MinScore(v) => min_score = v,
+                        }
+                    }
+
                     timer.start();
 
-                    let vertices = inferer.req_infer().await;
-                    let vertices = vertices.into_iter().flatten().collect();
+                    let vertices = inferer
+                        .req_infer(min_iou, min_score)
+                        .await
+                        .into_iter()
+                        .flatten()
+                        .collect();
 
                     // if this fails, the stitcher has probably exited and we also need exit
-                    if let Err(err) = bound_update_send.send(Update::Bounds(vertices)).await {
+                    if let Err(err) = bound_update_send.send(StitchUpdate::Bounds(vertices)).await {
                         tracing::error!(
                             "bound updater exiting because it was unable to message the stitcher: {err:?}"
                         );
@@ -110,8 +136,11 @@ impl Sticher {
                     timer.mark_from_base("bound-loop");
                 }
             });
+
+            infer_update_send
         };
 
+        // stitcher running task
         tokio::spawn(async move {
             let res = SticherInner::from_cfg(&cfg, (proj_w, proj_h), msg_send, update_recv);
             let Ok(inner) =
@@ -131,7 +160,9 @@ impl Sticher {
 
         Self {
             msg_recv: msg_recv.to_async(),
-            update_send,
+            stitch_update_send: update_send,
+            #[cfg(feature = "trt")]
+            infer_update_send,
         }
     }
 
@@ -140,11 +171,25 @@ impl Sticher {
     }
 
     pub fn update_proj_style(&self, f: impl FnOnce(&mut ProjectionStyle) + Send + 'static) {
-        _ = self.update_send.send(Update::ProjStyle(Box::new(f)));
+        _ = self
+            .stitch_update_send
+            .send(StitchUpdate::ProjStyle(Box::new(f)));
     }
 
     pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
-        _ = self.update_send.send(Update::ViewStyle(Box::new(f)));
+        _ = self
+            .stitch_update_send
+            .send(StitchUpdate::ViewStyle(Box::new(f)));
+    }
+
+    #[cfg(feature = "trt")]
+    pub fn set_min_iou(&self, v: f32) {
+        _ = self.infer_update_send.send(InferUpdate::MinIOU(v));
+    }
+
+    #[cfg(feature = "trt")]
+    pub fn set_min_score(&self, v: f32) {
+        _ = self.infer_update_send.send(InferUpdate::MinScore(v));
     }
 }
 
@@ -194,16 +239,6 @@ impl crate::infer_host::InferHandler for InferView {
 
         img.copy_from_slice(&r_img);
         depth.copy_from(bytemuck::cast_slice(&r_depth));
-
-        #[cfg(feature = "capture")]
-        image::save_buffer(
-            format!("sub-{:?}.png", self.view.perspective_info().unwrap().1),
-            &r_img,
-            640,
-            640,
-            image::ColorType::Rgba8,
-        )
-        .unwrap();
 
         self.tmp_img = Some(r_img);
         self.tmp_depth = Some(r_depth);
@@ -261,7 +296,7 @@ impl crate::infer_host::InferHandler for InferView {
 
 struct SticherInner<B: OwnedWriteBuffer> {
     pub sender: kanal::Sender<Message>,
-    pub update_chan: kanal::Receiver<Update>,
+    pub update_chan: kanal::Receiver<StitchUpdate>,
     pub proj_style: ProjectionStyle,
     pub view_style: ViewStyle,
     pub proj_buf: VideoPacket,
@@ -273,7 +308,7 @@ impl<B: OwnedWriteBuffer + Send + 'static> SticherInner<B> {
         cfg: &proj::Config<cam_loader::Config>,
         proj_size: (usize, usize),
         sender: kanal::Sender<Message>,
-        update_chan: kanal::Receiver<Update>,
+        update_chan: kanal::Receiver<StitchUpdate>,
     ) -> Result<Self> {
         let cams = cfg
             .cameras
@@ -378,11 +413,11 @@ impl SticherInner<GpuDirectBufferWrite> {
         loop {
             match self.update_chan.try_recv() {
                 Ok(Some(msg)) => match msg {
-                    Update::ProjStyle(f) => f(&mut self.proj_style),
-                    Update::ViewStyle(f) => forwarding
+                    StitchUpdate::ProjStyle(f) => f(&mut self.proj_style),
+                    StitchUpdate::ViewStyle(f) => forwarding
                         .update_view(f)
                         .unwrap_or_else(|err| tracing::error!("failed to update main view: {err}")),
-                    Update::Bounds(tris) => proj.update_bounding_verts(&tris).await,
+                    StitchUpdate::Bounds(tris) => proj.update_bounding_verts(&tris).await,
                 },
                 Ok(None) => return true,
                 Err(_) => return false,

@@ -6,6 +6,8 @@ use crate::{Error, Loader, OwnedWriteBuffer, Result};
 
 #[cfg(feature = "argus")]
 mod argus;
+#[cfg(feature = "image")]
+mod image;
 mod pattern;
 #[cfg(feature = "v4l")]
 mod v4l;
@@ -32,6 +34,8 @@ pub enum Mode {
     V4L(v4l::Config),
     #[cfg(feature = "argus")]
     Argus(argus::Config),
+    #[cfg(feature = "image")]
+    Image(PathBuf),
 }
 
 fn default_grid_size() -> u32 {
@@ -48,6 +52,8 @@ impl<B: OwnedWriteBuffer + Send + 'static> TryFrom<Config> for Loader<B> {
             Mode::V4L(ref cfg) => v4l::from_spec(&spec, cfg.clone()),
             #[cfg(feature = "argus")]
             Mode::Argus(ref cfg) => Ok(argus::from_spec(&spec, cfg.clone())),
+            #[cfg(feature = "image")]
+            Mode::Image(ref path) => image::from_spec(&spec, &path),
         }
     }
 }

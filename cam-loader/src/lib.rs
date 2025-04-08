@@ -23,6 +23,10 @@ pub enum Error {
     #[error(transparent)]
     ArgusError(#[from] argus::Error),
 
+    #[cfg(feature = "image")]
+    #[error(transparent)]
+    ImageError(#[from] image::error::ImageError),
+
     #[error("error: {0}")]
     Other(String),
 }

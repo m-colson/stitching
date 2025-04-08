@@ -5,9 +5,9 @@ edition = "2024"
 
 [features]
 default = ["trt"]
-capture = ["dep:image"]
 trt = ["dep:trt-yolo", "dep:tensorrt"]
 video = ["stitch/v4l", "stitch/argus"]
+image = ["cam-loader/image"]
 jetson = ["trt", "video"]
 
 [dependencies]
@@ -29,7 +29,7 @@ clap = { version = "4.5.20", default-features = false, features = [
 futures-util = "0.3.31"
 half = "2.4.1"
 glam.workspace = true
-image = { workspace = true, optional = true }
+image = { workspace = true }
 kanal.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true }

@@ -451,7 +451,7 @@ impl GpuProjector {
                             upd(&mut style);
 
                             let view = style.transform_matrix(w as f32, h as f32);
-                            rend_out.cam.set_global(&view)
+                            rend_out.cam.set_global(&view);
                         }
                     };
                 }

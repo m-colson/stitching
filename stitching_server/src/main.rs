@@ -3,6 +3,8 @@ use std::{net::Ipv4Addr, time::Duration};
 use anyhow::Result;
 use app::App;
 use clap::{Parser, Subcommand};
+use futures_util::future::join_all;
+use stitch::proj;
 use util::Metrics;
 
 mod app;
@@ -64,32 +66,32 @@ impl Args {
 
                 monitoring_handle.abort();
             }
-            #[cfg(feature = "capture")]
-            ArgCommand::CaptureLive => {
-                use stitch::{camera, proj};
+            ArgCommand::CaptureLive { num_reads } => {
                 let cfg = proj::Config::<cam_loader::Config>::open("live.toml")?;
-                for (i, c) in cfg.cameras.into_iter().enumerate() {
-                    let [width, height] = c.meta.resolution;
-                    let mut buf = vec![0u8; (width * height * 4) as usize];
-                    let c = c.load::<Vec<u8>>()?;
-                    for _ in 0..10 {
-                        let ticket = c.data.give(buf)?;
-                        buf = ticket.block_take()?;
-                    }
-                    image::save_buffer(
-                        format!("capture{i}.png"),
-                        &buf,
-                        width,
-                        height,
-                        image::ExtendedColorType::Rgba8,
-                    )?;
-                }
-            }
-            #[cfg(not(feature = "capture"))]
-            ArgCommand::CaptureLive => {
-                anyhow::bail!(
-                    "this binary was not compiled with the \"capture\" feature enabled, which is required for this subcommand"
-                );
+
+                let futs = cfg
+                    .cameras
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, c)| async move {
+                        let [width, height] = c.meta.resolution;
+                        let mut buf = vec![0u8; (width * height * 4) as usize];
+                        let c = c.load::<Vec<u8>>().unwrap();
+                        for _ in 0..num_reads {
+                            let ticket = c.data.give(buf).unwrap();
+                            buf = ticket.take().await.unwrap();
+                        }
+                        image::save_buffer(
+                            format!("capture{i}.png"),
+                            &buf,
+                            width,
+                            height,
+                            image::ExtendedColorType::Rgba8,
+                        )
+                        .unwrap();
+                    });
+
+                _ = join_all(futs).await;
             }
         }
         Ok(())
@@ -108,6 +110,9 @@ pub enum ArgCommand {
         port: u16,
     },
     /// Capture a raw image from every configured cameras and save them as capture*.png
-    CaptureLive,
+    CaptureLive {
+        #[arg(short, default_value = "10")]
+        num_reads: usize,
+    },
     // SimMasks,
 }

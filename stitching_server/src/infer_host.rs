@@ -16,7 +16,7 @@ pub enum InferError {
 pub type InferResult<T> = ::std::result::Result<T, InferError>;
 
 pub struct InferHost<H: InferHandler> {
-    ready_send: kanal::AsyncSender<kanal::AsyncSender<Vec<H::Item>>>,
+    ready_send: kanal::AsyncSender<InferRequest<H::Item>>,
 }
 
 impl<H: InferHandler> Clone for InferHost<H> {
@@ -27,6 +27,12 @@ impl<H: InferHandler> Clone for InferHost<H> {
     }
 }
 
+pub struct InferRequest<T> {
+    pub min_iou: f32,
+    pub min_score: f32,
+    pub resp_send: kanal::AsyncSender<Vec<T>>,
+}
+
 impl<H: InferHandler + Send + Sync + 'static> InferHost<H>
 where
     H::Item: Send + 'static,
@@ -34,7 +40,7 @@ where
     pub fn spawn(handlers: impl IntoIterator<Item = H> + Send + 'static) -> InferResult<Self> {
         let which = Which::best();
 
-        let (ready_send, ready_recv) = kanal::bounded_async::<kanal::AsyncSender<Vec<H::Item>>>(4);
+        let (ready_send, ready_recv) = kanal::bounded_async::<InferRequest<H::Item>>(4);
 
         tokio::spawn(async move {
             let mut in_bufs = handlers
@@ -66,7 +72,11 @@ where
             let stream = CudaStream::new().expect("failed to create infer cuda stream");
             loop {
                 match ready_recv.recv().await {
-                    Ok(done) => {
+                    Ok(InferRequest {
+                        min_iou,
+                        min_score,
+                        resp_send,
+                    }) => {
                         futures_util::future::join_all(
                             in_bufs.iter_mut().map(|(_, h, img, depth)| async {
                                 h.fetch_image(img, depth).await
@@ -96,7 +106,7 @@ where
                                     .synchronize()
                                     .expect("failed to synchronize infer stream");
 
-                                trt_yolo::nms_cpu(&out_buf, which.out_shape(), 0.65, 0.5)
+                                trt_yolo::nms_cpu(&out_buf, which.out_shape(), min_iou, min_score)
                             })
                             .collect::<Vec<_>>();
 
@@ -110,7 +120,7 @@ where
                         .await;
 
                         // if this fails, the receiver must not have needed a response
-                        _ = done.send(out).await;
+                        _ = resp_send.send(out).await;
                     }
                     Err(err) => {
                         match err {
@@ -142,10 +152,18 @@ where
     //     lock.2.copy_from(&depth);
     // }
 
-    pub async fn req_infer(&self) -> Vec<H::Item> {
+    pub async fn req_infer(&self, min_iou: f32, min_score: f32) -> Vec<H::Item> {
         let (resp_send, resp) = kanal::bounded_async(1);
 
-        if let Err(err) = self.ready_send.send(resp_send).await {
+        if let Err(err) = self
+            .ready_send
+            .send(InferRequest {
+                min_iou,
+                min_score,
+                resp_send,
+            })
+            .await
+        {
             tracing::error!("error requesting infer: {err}")
         }
 

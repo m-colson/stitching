@@ -107,7 +107,7 @@
       }
 
       drawDebugGrid() {
-        const rh = 120;
+        const rh = 70;
         const tile = 50.8;
         const width = 1280;
         const height = 720;
@@ -154,7 +154,7 @@
     window.addEventListener("load", moveHandler);
 
     async function changeView(num) {
-      await fetch(`/set/view/${num}`, { method: "PUT" })
+      await fetch(`/settings/view/${num}`, { method: "PUT" })
     } 
   </script>
 </head>
