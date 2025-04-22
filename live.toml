@@ -1,6 +1,13 @@
+[server]
+host = "0.0.0.0"
+port = 2780
+asset_dir = "stitching_server/assets"
+
 [world.cylinder]
 radius = 70
 # height = 150
+
+#-- NOTE: all coordinates are in centimeters --#
 
 [model]
 path = "assets/plane_v6.obj"
@@ -25,7 +32,7 @@ z = 30
 look_at = [0, 0, 10]
 frame_per_rev = 500
 
-# NOTE: this order of cameras is expected in the UI
+#-- NOTE: this order of cameras is expected in the UI --#
 
 [[cameras]]
 pos = [0, -3.358, 5.211]
@@ -41,7 +48,7 @@ mask_path = "assets/bottom-mask.png"
 
 v4l.index = 6
 # pattern.color = [255, 40, 150]
-image = "capture0.png"
+# image = "capture0.png"
 
 [[cameras]]
 pos = [0, -18.157, 26.642]
@@ -57,7 +64,7 @@ mask_path = "assets/tail-mask.png"
 
 v4l.index = 2
 # pattern.color = [255, 90, 60]
-image = "capture1.png"
+# image = "capture1.png"
 
 [[cameras]]
 pos = [-5.348, -11.422, 13.626]
@@ -73,7 +80,7 @@ mask_path = "assets/left-mask.png"
 
 argus = { index = 0, mode = 0 }
 # pattern.color = [0, 255, 0]
-image = "capture2.png"
+# image = "capture2.png"
 
 [[cameras]]
 pos = [5.348, -11.422, 13.625]
@@ -89,4 +96,4 @@ mask_path = "assets/right-mask.png"
 
 argus = { index = 1, mode = 0 }
 # pattern.color = [0, 0, 255]
-image = "capture3.png"
+# image = "capture3.png"

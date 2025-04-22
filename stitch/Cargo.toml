@@ -17,7 +17,7 @@ encase = { version = "0.10.0", features = ["glam"] }
 glam = { workspace = true, optional = true }
 image.workspace = true
 kanal.workspace = true
-serde = { version = "1.0.214", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 smpgpu = { path = "../smpgpu", optional = true, features = [
     "tokio_task_poller",
 ] }

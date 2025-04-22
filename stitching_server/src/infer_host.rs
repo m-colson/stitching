@@ -1,9 +1,8 @@
 use std::io;
 
 use stitch::proj::DepthData;
-use tensorrt::{CudaBuffer, CudaError, CudaStream, RuntimeEngineContext};
 use thiserror::Error;
-use trt_yolo::Which;
+use trt_yolo::{CudaBuffer, CudaError, CudaStream, RuntimeEngineContext, Which};
 
 #[derive(Debug, Error)]
 pub enum InferError {
@@ -110,14 +109,11 @@ where
                             })
                             .collect::<Vec<_>>();
 
-                        let out = futures_util::future::join_all(
-                            bound_groups.into_iter().zip(&mut in_bufs).map(
-                                |(bbs, (_, h, _, depth))| async move {
-                                    h.handle_bounds(bbs, depth).await
-                                },
-                            ),
-                        )
-                        .await;
+                        let out = bound_groups
+                            .into_iter()
+                            .zip(&mut in_bufs)
+                            .map(|(bbs, (_, h, _, depth))| h.handle_bounds(bbs, depth))
+                            .collect();
 
                         // if this fails, the receiver must not have needed a response
                         _ = resp_send.send(out).await;
@@ -139,18 +135,6 @@ where
 
         Ok(Self { ready_send })
     }
-
-    // pub fn run_input(&self, n: usize, custom: T, data: &[u8], depth: DepthData<'_>) {
-    //     let Ok(mut lock) = self.in_bufs[n].try_lock() else {
-    //         // lock is already held, skip this frame or we will block.
-    //         return;
-    //     };
-    //     if let Err(err) = lock.0.copy_from(data) {
-    //         tracing::error!("error setting infer input {n}: {err}");
-    //     }
-    //     lock.1 = Some(custom);
-    //     lock.2.copy_from(&depth);
-    // }
 
     pub async fn req_infer(&self, min_iou: f32, min_score: f32) -> Vec<H::Item> {
         let (resp_send, resp) = kanal::bounded_async(1);
@@ -182,9 +166,5 @@ pub trait InferHandler {
         depth: &mut DepthData<'_>,
     ) -> impl Future<Output = ()> + Send;
 
-    fn handle_bounds(
-        &mut self,
-        bounds: Vec<BoundingClass>,
-        depth: &DepthData,
-    ) -> impl Future<Output = Self::Item> + Send;
+    fn handle_bounds(&mut self, bounds: Vec<BoundingClass>, depth: &DepthData) -> Self::Item;
 }

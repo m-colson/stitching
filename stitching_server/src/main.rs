@@ -1,4 +1,4 @@
-use std::{net::Ipv4Addr, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use anyhow::Result;
 use app::App;
@@ -16,7 +16,7 @@ mod util;
 #[tokio::main]
 pub async fn main() {
     log::initialize(format!(
-        "{}=debug,tower_http=debug,stitch=debug,smpgpu=debug,cam_loader=debug",
+        "{}=debug,tower_http=debug,stitch=debug,smpgpu=debug,cam_loader=debug,tensorrt=info",
         env!("CARGO_CRATE_NAME")
     ));
 
@@ -26,6 +26,8 @@ pub async fn main() {
 #[derive(Clone, Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
+    #[arg(short, long, default_value = "live.toml")]
+    pub cfg_path: PathBuf,
     #[clap(subcommand)]
     pub cmd: ArgCommand,
 }
@@ -35,39 +37,32 @@ impl Args {
     /// errors can occur if the [`App`] cannot be loaded, or the server fails.
     pub async fn run(self) -> Result<()> {
         match self.cmd {
-            ArgCommand::Serve {
-                timeout,
-                host,
-                port,
-            } => {
-                let app = App::from_toml_cfg("live.toml", 1280, 720).await?;
+            ArgCommand::Serve { timeout } => {
+                let app = App::from_toml_cfg(self.cfg_path, 1280, 720).await?;
 
                 let monitoring_handle = tokio::spawn(async {
                     loop {
                         tokio::time::sleep(Duration::from_secs(3)).await;
                         Metrics::with(|m| tracing::info!("timing {}", m));
+                        if let Err(err) = Metrics::write_csv("metrics.csv") {
+                            tracing::error!("error saving metrics: {err}");
+                        }
                         Metrics::reset();
                     }
                 });
 
-                let listen = format!("{}:{}", host, port);
                 match timeout {
                     Some(n) => {
-                        app.listen_and_serve_until(
-                            listen,
-                            tokio::time::sleep(Duration::from_secs(n)),
-                        )
-                        .await?;
-
-                        Metrics::save_csv("metrics.csv")?;
+                        app.listen_and_serve_until(tokio::time::sleep(Duration::from_secs(n)))
+                            .await?;
                     }
-                    None => app.listen_and_serve(listen).await?,
+                    None => app.listen_and_serve().await?,
                 };
 
                 monitoring_handle.abort();
             }
             ArgCommand::CaptureLive { num_reads } => {
-                let cfg = proj::Config::<cam_loader::Config>::open("live.toml")?;
+                let cfg = proj::Config::<cam_loader::Config>::open(self.cfg_path)?;
 
                 let futs = cfg
                     .cameras
@@ -104,15 +99,10 @@ pub enum ArgCommand {
     Serve {
         #[arg(short, long)]
         timeout: Option<u64>,
-        #[arg(long, default_value = "0.0.0.0")]
-        host: Ipv4Addr,
-        #[arg(short, long, default_value_t = 2780)]
-        port: u16,
     },
     /// Capture a raw image from every configured cameras and save them as capture*.png
     CaptureLive {
         #[arg(short, default_value = "10")]
-        num_reads: usize,
+        num_reads: usize, // number of times to capture the image before saving it, allowing camera to stabilize settings.
     },
-    // SimMasks,
 }

@@ -1,14 +1,11 @@
-use std::{f32::consts::PI, fs::File, io::BufReader, time::Duration};
+use std::{fs::File, io::BufReader, time::Duration};
 
 use axum::extract::ws::Message;
 use cam_loader::{Loader, OwnedWriteBuffer, buf::FrameSize};
 use stitch::{
     Result,
     camera::Camera,
-    proj::{
-        self, DepthData, GpuDirectBufferWrite, GpuProjector, ProjectionStyle, ProjectionView,
-        TexturedVertex, ViewStyle,
-    },
+    proj::{self, GpuDirectBufferWrite, GpuProjector, ProjectionView, TexturedVertex, ViewStyle},
 };
 
 use crate::util::IntervalTimer;
@@ -18,8 +15,8 @@ use crate::infer_host::InferHost;
 
 use super::proto::VideoPacket;
 pub enum StitchUpdate {
-    ProjStyle(Box<dyn FnOnce(&mut ProjectionStyle) + Send>),
     ViewStyle(Box<dyn FnOnce(&mut ViewStyle) + Send>),
+    #[allow(dead_code)] // never constructed when trt feature disabled
     Bounds(Vec<TexturedVertex>),
 }
 
@@ -43,8 +40,6 @@ impl Sticher {
         proj_w: usize,
         proj_h: usize,
     ) -> Self {
-        let num_subs = 8;
-
         let cam_resolutions = cfg
             .cameras
             .iter()
@@ -78,12 +73,17 @@ impl Sticher {
 
         #[cfg(feature = "trt")]
         let infer_update_send = {
+            use std::f32::consts::PI;
+            use stitch::proj::DepthData;
+
+            const NUM_SUBS: i32 = 8;
+
             let (infer_update_send, infer_updates) = kanal::unbounded::<InferUpdate>();
 
-            let rm = 2. * PI / num_subs as f32;
+            let rm = 2. * PI / NUM_SUBS as f32;
             const SUB_HEIGHT: f32 = 10.;
 
-            let subs = (0..num_subs)
+            let subs = (0..NUM_SUBS)
                 .map(|i| {
                     let rot = rm * (i as f32);
 
@@ -105,7 +105,7 @@ impl Sticher {
             // infer probing task
             tokio::spawn(async move {
                 let mut min_iou = 0.75;
-                let mut min_score = 0.5;
+                let mut min_score = 0.30;
 
                 let mut timer = IntervalTimer::new();
                 while !infer_updates.is_disconnected() {
@@ -170,12 +170,6 @@ impl Sticher {
         self.msg_recv.recv().await.ok()
     }
 
-    pub fn update_proj_style(&self, f: impl FnOnce(&mut ProjectionStyle) + Send + 'static) {
-        _ = self
-            .stitch_update_send
-            .send(StitchUpdate::ProjStyle(Box::new(f)));
-    }
-
     pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
         _ = self
             .stitch_update_send
@@ -202,6 +196,7 @@ pub struct InferView {
     cutoff_width: f32,
 }
 
+#[cfg(feature = "trt")]
 impl InferView {
     pub fn new(view: ViewStyle, proj: ProjectionView<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {
@@ -244,7 +239,7 @@ impl crate::infer_host::InferHandler for InferView {
         self.tmp_depth = Some(r_depth);
     }
 
-    async fn handle_bounds(
+    fn handle_bounds(
         &mut self,
         bounds: Vec<crate::infer_host::BoundingClass>,
         depth: &DepthData<'_>,
@@ -297,7 +292,6 @@ impl crate::infer_host::InferHandler for InferView {
 struct SticherInner<B: OwnedWriteBuffer> {
     pub sender: kanal::Sender<Message>,
     pub update_chan: kanal::Receiver<StitchUpdate>,
-    pub proj_style: ProjectionStyle,
     pub view_style: ViewStyle,
     pub proj_buf: VideoPacket,
     pub cams: Vec<Camera<Loader<B>>>,
@@ -339,7 +333,6 @@ impl<B: OwnedWriteBuffer + Send + 'static> SticherInner<B> {
         Ok(Self {
             sender,
             update_chan,
-            proj_style: cfg.style,
             view_style: cfg.view,
             proj_buf: VideoPacket::new(proj_size.0, proj_size.1, 4)?,
             cams,
@@ -413,7 +406,6 @@ impl SticherInner<GpuDirectBufferWrite> {
         loop {
             match self.update_chan.try_recv() {
                 Ok(Some(msg)) => match msg {
-                    StitchUpdate::ProjStyle(f) => f(&mut self.proj_style),
                     StitchUpdate::ViewStyle(f) => forwarding
                         .update_view(f)
                         .unwrap_or_else(|err| tracing::error!("failed to update main view: {err}")),

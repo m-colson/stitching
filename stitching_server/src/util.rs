@@ -132,15 +132,19 @@ impl Metrics {
         Self::lock_global().marks = HashMap::new();
     }
 
-    pub fn save_csv(out_path: impl AsRef<path::Path>) -> io::Result<()> {
+    pub fn write_csv(out_path: impl AsRef<path::Path>) -> io::Result<()> {
         let mut out = fs::File::create(out_path)?;
 
-        writeln!(out, "name,mean,stddev,samples")?;
+        writeln!(out, "time,name,mean,stddev,samples")?;
         let mut marks = Self::current_marks().into_iter().collect::<Vec<_>>();
         marks.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         for (name, (mean, stddev, count)) in marks {
-            writeln!(out, "{name},{mean:.2},{stddev:.2},{count}")?;
+            writeln!(
+                out,
+                "{},{name},{mean:.2},{stddev:.2},{count}",
+                chrono::Local::now()
+            )?;
         }
 
         Ok(())

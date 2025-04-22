@@ -6,21 +6,18 @@ use std::{
 
 use axum::extract::ws::Message;
 use cam_loader::{OwnedWriteBuffer, buf::FrameSize};
-use stitch::proj::ProjectionStyle;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, little_endian};
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 enum PacketKind {
     Nop = 0,
-    SettingsSync = 1,
     UpdateFrame = 2,
     Timing = 4,
 }
 
 pub enum RecvPacket {
     Nop,
-    SettingsSync(SettingsPacket),
     Timing(TimingPacket),
 }
 
@@ -28,46 +25,7 @@ impl RecvPacket {
     pub fn from_raw(data: &[u8]) -> Option<Self> {
         (data[0] == PacketKind::Nop as _)
             .then_some(Self::Nop)
-            .or_else(|| SettingsPacket::from_raw(data).map(Self::SettingsSync))
             .or_else(|| TimingPacket::from_raw(data).map(Self::Timing))
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct SettingsPacket {
-    _kind: PacketKind,
-    view_type: u8,
-}
-
-impl SettingsPacket {
-    // remains for future reference
-    // #[inline]
-    // pub const fn new(style: ProjectionStyle) -> Self {
-    //     Self {
-    //         _kind: PacketKind::SettingsSync,
-    //         view_type: match style {
-    //             ProjectionStyle::RawCamera(n) => n as _,
-    //             ProjectionStyle::Hemisphere { .. } => 255,
-    //         },
-    //     }
-    // }
-
-    #[inline]
-    pub fn from_raw(data: &[u8]) -> Option<Self> {
-        (data[0] == PacketKind::SettingsSync as _).then_some(Self {
-            _kind: PacketKind::SettingsSync,
-            view_type: data[1],
-        })
-    }
-
-    #[allow(dead_code)]
-    #[inline]
-    pub const fn view_type(self) -> ProjectionStyle {
-        match self.view_type {
-            255 => ProjectionStyle::Normal,
-            n => ProjectionStyle::RawCamera(n as _),
-        }
     }
 }
 
@@ -232,8 +190,8 @@ impl TimingPacket {
         let client_millis = self.client_send - self.client_recv;
         let round_trip = (server_recv - self.server_send) - client_millis;
         (
-            Duration::from_secs_f64(client_millis / 1000.),
-            Duration::from_secs_f64(round_trip / 1000.),
+            Duration::from_secs_f64(client_millis.max(0.) / 1000.),
+            Duration::from_secs_f64(round_trip.max(0.) / 1000.),
         )
     }
 }

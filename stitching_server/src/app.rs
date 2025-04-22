@@ -10,11 +10,9 @@ use axum::{
     extract::{self, State, ws::Message},
     routing::{get, put},
 };
-use stitch::{
-    camera::ViewParams,
-    proj::{ProjectionStyle, ViewStyle},
-};
-use tokio::net::{TcpListener, ToSocketAddrs};
+use serde::{Deserialize, Serialize};
+use stitch::{camera::ViewParams, proj::ViewStyle};
+use tokio::net::TcpListener;
 
 use crate::{log, util::ws_upgrader};
 
@@ -30,20 +28,37 @@ pub struct App(Arc<AppInner>);
 struct AppInner {
     pub stitcher: Sticher,
     pub camera_views: Vec<ViewParams>,
+    pub server_cfg: ServerConfig,
+}
+
+#[derive(Serialize, Deserialize)]
+struct AppConfig {
+    pub server: ServerConfig,
+    #[serde(flatten)]
+    pub proj: stitch::proj::Config<cam_loader::Config>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ServerConfig {
+    pub host: String,
+    pub port: u16,
+    pub asset_dir: PathBuf,
 }
 
 impl App {
     pub fn into_router(self) -> Router {
-        Router::new()
-            .fallback_service(tower_http::services::ServeDir::new(PathBuf::from(
-                "stitching_server/assets",
-            )))
+        let router = Router::new()
+            .fallback_service(tower_http::services::ServeDir::new(
+                &self.0.server_cfg.asset_dir,
+            ))
             .route("/video", get(ws_upgrader(video::conn_state_machine)))
-            .route("/settings/view/{id}", put(set_view_handler))
+            .route("/settings/view/{id}", put(set_view_handler));
+        #[cfg(feature = "trt")]
+        let router = router
             .route("/settings/min-iou/{id}", put(set_min_iou_handler))
-            .route("/settings/min-score/{id}", put(set_min_score_handler))
-            .layer(log::http_trace_layer())
-            .with_state(self)
+            .route("/settings/min-score/{id}", put(set_min_score_handler));
+
+        router.layer(log::http_trace_layer()).with_state(self)
     }
 
     pub async fn from_toml_cfg(
@@ -57,48 +72,49 @@ impl App {
             .map(Self)
     }
 
-    pub async fn listen_and_serve(
-        self,
-        a: impl ToSocketAddrs + Debug + Send + Sync,
-    ) -> std::io::Result<()> {
-        let bind = TcpListener::bind(&a).await?;
-        tracing::info!("listening on {a:?}");
+    async fn create_tcp_listener(&self) -> stitch::Result<TcpListener> {
+        let server_cfg = &self.0.server_cfg;
+        let addr = (&*server_cfg.host, server_cfg.port);
 
-        axum::serve(bind, self.into_router()).await
+        let bind = TcpListener::bind(addr).await?;
+        tracing::info!("listening on {}:{}", addr.0, addr.1);
+
+        Ok(bind)
+    }
+
+    pub async fn listen_and_serve(self) -> stitch::Result<()> {
+        let bind = self.create_tcp_listener().await?;
+        axum::serve(bind, self.into_router())
+            .await
+            .map_err(From::from)
     }
 
     pub async fn listen_and_serve_until(
         self,
-        a: impl ToSocketAddrs + Debug + Send + Sync,
         signal: impl Future<Output = ()> + Send + 'static,
-    ) -> std::io::Result<()> {
-        let bind = TcpListener::bind(&a).await?;
-        tracing::info!("listening on {a:?}");
-
+    ) -> stitch::Result<()> {
+        let bind = self.create_tcp_listener().await?;
         axum::serve(bind, self.into_router())
             .with_graceful_shutdown(signal)
             .await
+            .map_err(From::from)
     }
 
     pub async fn ws_frame(&self) -> Option<Message> {
         self.0.stitcher.next_frame_msg().await
     }
 
-    pub fn update_proj_style(&self, f: impl FnOnce(&mut ProjectionStyle) + Send + 'static) {
-        self.0.stitcher.update_proj_style(f);
-    }
-
     pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
         self.0.stitcher.update_view_style(f);
     }
 
+    #[cfg(feature = "trt")]
     pub fn set_min_iou(&self, v: f32) {
-        #[cfg(feature = "trt")]
         self.0.stitcher.set_min_iou(v);
     }
 
+    #[cfg(feature = "trt")]
     pub fn set_min_score(&self, v: f32) {
-        #[cfg(feature = "trt")]
         self.0.stitcher.set_min_score(v);
     }
 }
@@ -153,14 +169,16 @@ impl AppInner {
         proj_w: usize,
         proj_h: usize,
     ) -> stitch::Result<Self> {
-        let cfg = stitch::proj::Config::open(&p)?;
+        let cfg = toml::from_str::<AppConfig>(&std::fs::read_to_string(&p)?)?;
+
         tracing::info!("opened config at {:?}", p.as_ref());
 
-        let camera_views = cfg.cameras.iter().map(|c| c.view).collect();
+        let camera_views = cfg.proj.cameras.iter().map(|c| c.view).collect();
 
         Ok(Self {
-            stitcher: Sticher::from_cfg_gpu(cfg, proj_w, proj_h),
+            stitcher: Sticher::from_cfg_gpu(cfg.proj, proj_w, proj_h),
             camera_views,
+            server_cfg: cfg.server,
         })
     }
 }

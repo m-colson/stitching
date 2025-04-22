@@ -51,12 +51,12 @@ impl<'a> Builder<'a> {
         &self,
         network: &NetworkDefinition,
         config: &BuilderConfig,
-    ) -> SerializedNetwork {
+    ) -> Option<SerializedNetwork> {
         let raw = unsafe {
             let funcs = tensorrt_sys::IBuilder::funcs(self.0);
             ((*funcs).build_serialized_network)((*self.0).mImpl, network.as_ffi(), config.as_ffi())
         };
-        SerializedNetwork(raw)
+        (!raw.is_null()).then_some(SerializedNetwork(raw))
     }
 }
 
@@ -160,8 +160,8 @@ impl Drop for SerializedNetwork {
 
 impl SerializedNetwork {
     pub fn save_to_file(&self, filename: impl AsRef<Path>) -> io::Result<()> {
-        let mut f = fs::File::create(filename)?;
         let data = unsafe { (*self.0).as_bytes() };
+        let mut f = fs::File::create(filename)?;
         f.write_all(data)
     }
 }

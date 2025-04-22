@@ -1,6 +1,8 @@
 use std::path::Path;
 use strum::VariantArray;
-use tensorrt::{CudaBuffer, CudaStream, ExecutionContext};
+use tensorrt::ExecutionContext;
+
+pub use tensorrt::{CudaBuffer, CudaError, CudaStream, RuntimeEngineContext};
 
 pub mod boxes;
 pub mod coco;
@@ -169,6 +171,8 @@ impl Which {
         let plan_path = plan_root.join(Path::new(name)).with_extension("plan");
 
         if !plan_path.exists() {
+            #[cfg(feature = "tracing")]
+            tracing::info!("missing plan for {name}, building...");
             std::fs::create_dir_all(&plan_root)?;
 
             tensorrt::onnx_slice_to_plan(self.onnx_data()).save_to_file(&plan_path)?;

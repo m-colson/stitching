@@ -33,7 +33,7 @@ pub fn onnx_file_to_plan(filename: &str) -> SerializedNetwork {
     let serialized = builder.build_serialized_network(&network, &config);
     drop(parser); // For now, make sure the compiler doesn't shorten lifetime. FIX
 
-    serialized
+    serialized.expect("failed to build plan")
 }
 
 pub fn onnx_slice_to_plan(data: &[u8]) -> SerializedNetwork {
@@ -55,5 +55,5 @@ pub fn onnx_slice_to_plan(data: &[u8]) -> SerializedNetwork {
     let serialized = builder.build_serialized_network(&network, &config);
     drop(parser); // For now, make sure the compiler doesn't shorten lifetime. FIX
 
-    serialized
+    serialized.expect("failed to build plan")
 }

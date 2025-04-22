@@ -17,7 +17,9 @@ pub struct RuntimeEngineContext<'a>(
 impl RuntimeEngineContext<'_> {
     pub fn new_engine_slice(plan: &[u8]) -> Self {
         let rt = Runtime::new();
-        let eng = rt.cuda_engine_from_slice(plan);
+        let eng = rt
+            .cuda_engine_from_slice(plan)
+            .expect("failed to create cuda engine");
         let ctx =
             eng.create_execution_context(tensorrt_sys::ExecutionContextAllocationStrategy::kSTATIC);
         Self(rt.0, eng.0, ctx.0, PhantomData)
@@ -42,9 +44,9 @@ impl<'a> Runtime<'a> {
         Runtime(raw, PhantomData)
     }
 
-    pub fn cuda_engine_from_slice<'b>(&'b self, plan: &[u8]) -> CudaEngine<'b> {
+    pub fn cuda_engine_from_slice<'b>(&'b self, plan: &[u8]) -> Option<CudaEngine<'b>> {
         let raw = unsafe { (*self.0).deserialize_slice_to_cuda_engine(plan) };
-        CudaEngine(raw, PhantomData)
+        (!raw.is_null()).then_some(CudaEngine(raw, PhantomData))
     }
 }
 

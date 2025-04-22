@@ -22,6 +22,8 @@ in with pkgs; mkShell {
         })
 
         unstablePkgs.rust-analyzer
+
+        mdbook
     ] ++ xorgPkgs;
 
     LD_LIBRARY_PATH = lib.makeLibraryPath ([

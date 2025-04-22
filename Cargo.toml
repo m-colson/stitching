@@ -1,5 +1,9 @@
 [workspace]
-members = [ "argus", "argus-sys", "cam-loader", "cpp-interop",
+members = [
+    "argus",
+    "argus-sys",
+    "cam-loader",
+    "cpp-interop",
     "smpgpu",
     "stitch",
     "stitching_server",
@@ -7,10 +11,13 @@ members = [ "argus", "argus-sys", "cam-loader", "cpp-interop",
     "tensorrt-sys",
     "trt-yolo",
 ]
+default-members = ["stitching_server"]
 resolver = "2"
 
 [workspace.dependencies]
-bindgen = { version = "0.71.1", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.71.1", default-features = false, features = [
+    "runtime",
+] }
 futures = { version = "0.3.31", default-features = false }
 glam = { version = "0.29.2" }
 image = { version = "0.25.4", default-features = false, features = ["png"] }
@@ -18,6 +25,7 @@ kanal = "0.1.0-pre8"
 thiserror = "2.0.11"
 tokio = { version = "1.41.0", features = ["rt-multi-thread", "sync"] }
 tracing = { version = "0.1.40", default-features = false }
+serde = "1.0.219"
 
 [profile.dev]
 debug = false

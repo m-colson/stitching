@@ -144,6 +144,7 @@ impl ICudaEngine {
         &self,
         strategy: ExecutionContextAllocationStrategy,
     ) -> *mut IExecutionContext {
+        println!("{:?}", self as *const _);
         let impl_ptr = self.mImpl;
         let impl_funcs = (*impl_ptr)._base.vtable_ as *const VCudaEngineVTable;
         ((*impl_funcs).create_execution_context)(impl_ptr, strategy)

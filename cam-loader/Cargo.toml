@@ -11,7 +11,7 @@ image = ["dep:image"]
 [dependencies]
 futures.workspace = true
 kanal.workspace = true
-serde = "1.0.219"
+serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

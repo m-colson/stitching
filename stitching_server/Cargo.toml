@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["trt"]
-trt = ["dep:trt-yolo", "dep:tensorrt"]
+default = []
+trt = ["dep:trt-yolo"]
 video = ["stitch/v4l", "stitch/argus"]
 image = ["cam-loader/image"]
 jetson = ["trt", "video"]
@@ -29,10 +29,10 @@ clap = { version = "4.5.20", default-features = false, features = [
 futures-util = "0.3.31"
 half = "2.4.1"
 glam.workspace = true
-image = { workspace = true }
+image.workspace = true
 kanal.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true }
+tokio.workspace = true
 tower-http = { version = "0.6.1", features = ["fs", "trace"] }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3.18", default-features = false, features = [
@@ -40,16 +40,21 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
     "env-filter",
     "registry",
 ] }
-trt-yolo = { version = "0.1.0", path = "../trt-yolo", optional = true }
-tensorrt = { version = "0.1.0", path = "../tensorrt", features = [
+trt-yolo = { version = "0.1.0", path = "../trt-yolo", features = [
     "tracing",
 ], optional = true }
+# tensorrt = { version = "0.1.0", path = "../tensorrt", features = [
+#     "tracing",
+# ], optional = true }
 zerocopy = { version = "0.8.9", features = ["alloc"] }
 flate2 = { version = "1.0.35", default-features = false, features = [
     "zlib-rs",
 ] }
 cam-loader = { version = "0.1.0", path = "../cam-loader" }
 qoi = "0.4.1"
+chrono = "0.4.40"
+serde.workspace = true
+toml = "0.8.20"
 
 [dependencies.stitch]
 path = "../stitch"

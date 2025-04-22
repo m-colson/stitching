@@ -3,7 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 
 use crate::util::{IntervalTimer, Metrics};
 
-use super::{proto::RecvPacket, App};
+use super::{App, proto::RecvPacket};
 
 pub async fn conn_state_machine(state: App, socket: WebSocket) {
     let (sender, receiver) = socket.split();
@@ -44,7 +44,7 @@ where
         .await;
 }
 
-async fn recv_loop<R>(state: App, mut receiver: R)
+async fn recv_loop<R>(_state: App, mut receiver: R)
 where
     R: StreamExt<Item = Result<Message, axum::Error>> + Unpin + Send,
 {
@@ -60,11 +60,6 @@ where
 
             match p {
                 RecvPacket::Nop => {}
-                RecvPacket::SettingsSync(_sp) => {
-                    state.update_proj_style(move |_proj_spec| {
-                        // *proj_spec = sp.view_type(proj_spec.radius());
-                    });
-                }
                 RecvPacket::Timing(timing) => {
                     let (dur, delay) = timing.info_now();
                     Metrics::push("client-update", delay.as_secs_f64() * 1000.);
