@@ -1,6 +1,9 @@
-use tower_http::trace::TraceLayer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+//! This module contains helper functions for create the tracing logger.
 
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
+/// Setup the [`tracing_subscriber`] with the given [`EnvFilter`].
 pub fn initialize(filter: impl Into<EnvFilter>) {
     tracing_subscriber::registry()
         .with(
@@ -10,8 +13,9 @@ pub fn initialize(filter: impl Into<EnvFilter>) {
         .init();
 }
 
-pub fn http_trace_layer(
-) -> TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>
+/// See [`TraceLayer::new_for_http`].
+pub fn http_trace_layer()
+-> TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>
 {
     TraceLayer::new_for_http()
 }

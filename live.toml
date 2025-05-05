@@ -46,8 +46,8 @@ framerate = 30
 
 mask_path = "assets/bottom-mask.png"
 
-v4l.index = 6
-# pattern.color = [255, 40, 150]
+# v4l.index = 6
+pattern.color = [255, 40, 150]
 # image = "capture0.png"
 
 [[cameras]]
@@ -62,8 +62,8 @@ framerate = 30
 
 mask_path = "assets/tail-mask.png"
 
-v4l.index = 2
-# pattern.color = [255, 90, 60]
+# v4l.index = 2
+pattern.color = [255, 90, 60]
 # image = "capture1.png"
 
 [[cameras]]
@@ -78,8 +78,8 @@ framerate = 21
 
 mask_path = "assets/left-mask.png"
 
-argus = { index = 0, mode = 0 }
-# pattern.color = [0, 255, 0]
+# argus = { index = 0, mode = 0 }
+pattern.color = [0, 255, 0]
 # image = "capture2.png"
 
 [[cameras]]
@@ -94,6 +94,6 @@ framerate = 21
 
 mask_path = "assets/right-mask.png"
 
-argus = { index = 1, mode = 0 }
-# pattern.color = [0, 0, 255]
+# argus = { index = 1, mode = 0 }
+pattern.color = [0, 0, 255]
 # image = "capture3.png"

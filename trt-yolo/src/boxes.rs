@@ -1,37 +1,27 @@
+//! This module contains types and functions used to interact with YOLO bounding boxes.
+
 use std::fmt::Display;
 
 use crate::coco;
 
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rect {
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-}
-
+/// Stores the location, size, class, and confidence score of a detected
+/// bounding box.
 #[derive(Clone, Copy, Debug)]
 pub struct BoundingClass {
     x_min: f32,
     y_min: f32,
     x_max: f32,
     y_max: f32,
+    /// The [`coco`] class id.
     pub class: usize,
+    /// The confidence score from 0-1.
     pub confidence: f32,
     area_cache: f32,
 }
 
 impl BoundingClass {
+    /// Creates a new bounding box from x,y positions of the boxes' corners,
+    /// class and confidence score.
     #[inline(always)]
     pub fn from_corners(x1: f32, y1: f32, x2: f32, y2: f32, class: usize, confidence: f32) -> Self {
         let x_min = x1.min(x2);
@@ -50,6 +40,8 @@ impl BoundingClass {
         }
     }
 
+    /// Creates a new bounding box centered at \[`cx`,`cy`\] with the provided
+    /// width, height, class, and confidence score.
     #[inline(always)]
     pub fn from_center(
         cx: f32,
@@ -73,71 +65,62 @@ impl BoundingClass {
         }
     }
 
+    /// Returns the minimum x coordinate of `self`.
     #[inline(always)]
     pub const fn xmin(&self) -> f32 {
         self.x_min
     }
 
+    /// Returns the minimum y coordinate of `self`.
     #[inline(always)]
     pub const fn ymin(&self) -> f32 {
         self.y_min
     }
 
+    /// Returns the maximum x coordinate of `self`.
     #[inline(always)]
     pub const fn xmax(&self) -> f32 {
         self.x_max
     }
 
+    /// Returns the maximum y coordinate of `self`.
     #[inline(always)]
     pub const fn ymax(&self) -> f32 {
         self.y_max
     }
 
+    /// Returns the corner coordinates ((x1, y1), (x2, y2)) of `self`.
     #[inline(always)]
     pub const fn corners(&self) -> ((f32, f32), (f32, f32)) {
         ((self.x_min, self.y_min), (self.x_max, self.y_max))
     }
 
+    /// Returns the width of `self`.
     #[inline(always)]
     pub const fn width(&self) -> f32 {
         self.x_max - self.x_min
     }
 
+    /// Return the height of `self`.
     #[inline(always)]
     pub const fn height(&self) -> f32 {
         self.y_max - self.y_min
     }
 
+    /// Returns the area of `self`.
     #[inline(always)]
     pub const fn area(&self) -> f32 {
         self.area_cache
     }
 
+    /// Returns the [`coco`] name of `self`'s class.
     #[inline(always)]
     pub const fn class_name(&self) -> &'static str {
         coco::NAMES[self.class]
     }
 
-    #[inline]
-    pub fn conf_rgb(&self) -> [u8; 3] {
-        let c = self.confidence * 2. - 1.;
-        if c >= 0. {
-            [((1. - c.clamp(0., 1.)) * 255.) as _, 255, 0]
-        } else {
-            [255, ((1. + c.clamp(-1., 0.)) * 255.) as _, 0]
-        }
-    }
-
-    #[inline]
-    pub fn conf_rgba(&self) -> [u8; 4] {
-        let c = self.confidence * 2. - 1.;
-        if c >= 0. {
-            [((1. - c.clamp(0., 1.)) * 255.) as _, 255, 0, 255]
-        } else {
-            [255, ((1. + c.clamp(-1., 0.)) * 255.) as _, 0, 255]
-        }
-    }
-
+    /// Returns a new bounding box where the coordinates are mapped from
+    /// `0..old_width -> 0..new_width` and `0..old_height` -> `0..new_height`.
     pub fn rescale(
         &self,
         old_width: f32,
@@ -156,16 +139,7 @@ impl BoundingClass {
         Self::from_corners(xmin, ymin, xmax, ymax, self.class, self.confidence)
     }
 
-    #[inline(always)]
-    pub fn to_imageproc_rect(&self) -> Rect {
-        Rect::new(
-            self.xmin() as _,
-            self.ymin() as _,
-            self.width() as _,
-            self.height() as _,
-        )
-    }
-
+    /// Returns the [Intersection over Union](https://en.wikipedia.org/wiki/Jaccard_index) between `self` and `other`.
     #[inline(always)]
     pub fn iou(&self, other: &BoundingClass) -> f32 {
         let i_xmin = self.xmin().max(other.xmin());
@@ -194,12 +168,12 @@ impl Display for BoundingClass {
     }
 }
 
-/// Non-maximum suppression (NMS) filters overlapping bounding boxes that have an intersection-over-
-/// union (IoU) greater or equal than the specified `iou_threshold` with previously selected boxes.
-///
-/// Boxes are filtered based on `score_threshold` and ranked based on their score. As such, lower
-/// scoring boxes are removed when overlapping with another (higher scoring) box.
-pub fn nms_cpu(
+/// Non-maximum suppression (NMS) filters overlapping bounding boxes that have
+/// an intersection-over-union (IoU) greater or equal than the provided
+/// `iou_threshold` with previously selected boxes. Boxes are filtered based on
+/// `score_threshold`. Lower scoring boxes are removed when overlapping with
+/// higher scoring boxes.
+pub fn nms_to_bounding(
     outputs: &[half::f16],
     shape: [usize; 3],
     iou_threshold: f32,

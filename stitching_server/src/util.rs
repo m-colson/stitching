@@ -1,3 +1,5 @@
+//! This module contains general utilities for logging and web sockets.
+
 use std::{
     collections::HashMap,
     fmt::Display,
@@ -14,6 +16,7 @@ use axum::{
     handler::Handler,
 };
 
+/// Creates a [`Handler`] that will call `cb` when a websocket connection is made.
 pub fn ws_upgrader<M, S: Send + Sync + Clone + 'static, Fut>(
     cb: impl FnOnce(S, WebSocket) -> Fut + Send + Sync + Clone + 'static,
 ) -> impl Handler<(M, State<S>, WebSocketUpgrade), S>
@@ -24,13 +27,18 @@ where
     |State(state), ws: WebSocketUpgrade| async move { ws.on_upgrade(move |sock| cb(state, sock)) }
 }
 
+/// Stores the information necessary to determine how long something took.
+/// Contains a base time which will not be changed on [`IntervalTimer::mark`] and
+/// can be used to record how long multiple markings took.
 pub struct IntervalTimer {
     base_time: Instant,
     mark_time: Instant,
 }
 
 impl IntervalTimer {
+    /// Creates a timer with the current time as its basis.
     #[inline]
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         let now = Instant::now();
         Self {
@@ -39,6 +47,7 @@ impl IntervalTimer {
         }
     }
 
+    /// Resets the basis and last marking time to the current time.
     #[inline]
     pub fn start(&mut self) {
         let now = Instant::now();
@@ -46,6 +55,8 @@ impl IntervalTimer {
         self.mark_time = now;
     }
 
+    /// Determines the time since the last marking and records a metric with `name`.
+    /// See [`Metrics::push`].
     #[inline]
     pub fn mark(&mut self, name: &str) {
         let now = Instant::now();
@@ -58,6 +69,8 @@ impl IntervalTimer {
         self.mark_time = now;
     }
 
+    /// Determines the time since the timer basis and records a metric with `name`.
+    /// See [`Metrics::push`].
     #[inline]
     pub fn mark_from_base(&mut self, name: &str) {
         let now = Instant::now();
@@ -70,6 +83,9 @@ impl IntervalTimer {
         self.mark_time = now;
     }
 
+    /// Determines the time since the timer basis and records a metric with `name`.
+    /// If less time has elapsed than the target expects,
+    /// it will sleep until the target is reached.
     #[inline]
     pub async fn log_and_wait_fps(&self, name: &str, target: Duration) {
         let diff = self.base_time.elapsed();
@@ -91,6 +107,8 @@ impl IntervalTimer {
 
 static GLOBAL_METRICS: LazyLock<Mutex<Metrics>> = LazyLock::new(|| Mutex::new(Metrics::new()));
 
+/// Contains map of named [`Metric`]s.
+/// In this software, a singleton of this type is used for all methods of this type.
 pub struct Metrics {
     marks: HashMap<String, Metric>,
 }
@@ -112,6 +130,8 @@ impl Metrics {
         }
     }
 
+    /// [`Metric::push`] to the value `v` with the given `name`.
+    /// If the name has not been used yet, it will be created.
     pub fn push(name: &str, v: f64) {
         Self::lock_global()
             .marks
@@ -120,6 +140,7 @@ impl Metrics {
             .push(v);
     }
 
+    /// Gets the current marking names and metric (average, standard deviation, count).
     pub fn current_marks() -> HashMap<String, (f64, f64, usize)> {
         Self::lock_global()
             .marks
@@ -128,10 +149,12 @@ impl Metrics {
             .collect()
     }
 
+    /// Clears all saved metrics.
     pub fn reset() {
         Self::lock_global().marks = HashMap::new();
     }
 
+    /// Creates and saves the current metrics to a csv file at `out_path`.
     pub fn write_csv(out_path: impl AsRef<path::Path>) -> io::Result<()> {
         let mut out = fs::File::create(out_path)?;
 
@@ -150,6 +173,7 @@ impl Metrics {
         Ok(())
     }
 
+    /// Runs the callback with an immutable reference to the singleton `Metrics` instance.
     pub fn with(f: impl FnOnce(&Self)) {
         f(&Self::lock_global())
     }
@@ -174,14 +198,17 @@ impl Display for Metrics {
     }
 }
 
+/// Represents a list of `f64` values in a way that is efficent to find the
+/// average and standard deviation of the list.
 #[derive(Clone, Copy, Default)]
-struct Metric {
+pub struct Metric {
     sum: f64,
     sum_sq: f64,
     count: u32,
 }
 
 impl Metric {
+    /// Adds the value to the pseudo-list.
     #[inline]
     pub fn push(&mut self, v: f64) {
         self.sum += v;
@@ -189,11 +216,13 @@ impl Metric {
         self.count += 1;
     }
 
+    /// Calculates the average of the pseudo-list.
     #[inline]
     pub fn average(self) -> f64 {
         self.sum / f64::from(self.count)
     }
 
+    /// Calculates the standard deviation of the pseudo-list.
     #[inline]
     pub fn std_dev(self) -> f64 {
         let n = f64::from(self.count);
@@ -202,7 +231,9 @@ impl Metric {
         exp_x.mul_add(-exp_x, exp_x2).sqrt()
     }
 
+    /// Returns the number of values in the pseudo-list.
     #[inline]
+    #[allow(clippy::len_without_is_empty)]
     pub const fn len(self) -> usize {
         self.count as _
     }

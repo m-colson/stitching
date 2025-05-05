@@ -7,9 +7,10 @@ edition = "2024"
 v4l = ["dep:v4l", "dep:mozjpeg"]
 argus = ["dep:argus"]
 image = ["dep:image"]
+serde = ["serde/derive"]
 
 [dependencies]
-futures.workspace = true
+futures = { workspace = true, features = ["alloc"] }
 kanal.workspace = true
 serde.workspace = true
 thiserror.workspace = true

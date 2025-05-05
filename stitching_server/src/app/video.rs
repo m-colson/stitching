@@ -1,3 +1,5 @@
+//! This module contains function that handle clients connections.
+
 use axum::extract::ws::{CloseFrame, Message, Utf8Bytes, WebSocket};
 use futures_util::{SinkExt, StreamExt};
 
@@ -5,6 +7,8 @@ use crate::util::{IntervalTimer, Metrics};
 
 use super::{App, proto::RecvPacket};
 
+/// Spawns tasks to handle the send and receive sides of the `socket` and aborts the tasks if the other fails.
+/// Completes when connection is closed.
 pub async fn conn_state_machine(state: App, socket: WebSocket) {
     let (sender, receiver) = socket.split();
 

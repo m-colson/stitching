@@ -1,12 +1,29 @@
+//! This module contains the types and functions for using [`Loader`]s.
+//!
+//! A loader runs in the background, usually in a [`tokio::task::spawn_blocking`] task.
+//! This allows you write loaders that iterface with otherwise synchronous APIs.
+//! This struct contains the send side of a channel where the receive side is
+//! owned by the loader task. With the [`Loader::give`] method, an owned buffer
+//! and response sender is sent to the task over the channel who can then load
+//! the buffer with data and return it with the response sender. A [`Ticket`] is
+//! returned from the `give` method containing the receive side of the response
+//! channel. The [`Ticket::take`] method will wait for the response and give
+//! the buffer you originally sent back, with the data filled in by the loader.
+
 use futures::future::join_all;
 
 use crate::{Error, Result, buf::FrameSize, util::log_recv_err};
 
+/// Can be implemented on types to signify that they own a writable buffer and
+/// can provided a mutable view into that buffer when needed.
 pub trait OwnedWriteBuffer {
+    /// The type of view `Self` will return. Must implement [`AsMut`] for `[u8]`
+    /// so it can written to.
     type View<'a>: AsMut<[u8]>
     where
         Self: 'a;
 
+    /// Returns a mutable view into `self`.
     fn owned_to_view(&mut self) -> Option<Self::View<'_>>;
 }
 
@@ -21,11 +38,17 @@ impl OwnedWriteBuffer for Vec<u8> {
     }
 }
 
+/// Can be impleted on types to signify that they own something and can provided
+/// it when needed. In this crate it is used as a more generic form of
+/// [`OwnedWriteBuffer`] that allows you to write to multiple owned buffers
+/// instead of only one.
 pub trait OwnedWritable {
+    /// The type of item that `Self` can give out.
     type Inner<'a>
     where
         Self: 'a;
 
+    /// Returns the item that `self` can give out.
     fn owned_to_inner(&mut self) -> Option<Self::Inner<'_>>;
 }
 
@@ -47,6 +70,8 @@ impl<B1: OwnedWritable, B2: OwnedWritable> OwnedWritable for (B1, B2) {
     }
 }
 
+/// Contains information about the resulting image and the channel used to send
+/// update requests. See [`crate::loader`] module docs.
 #[derive(Clone, Debug)]
 pub struct Loader<B> {
     req_send: kanal::Sender<(B, kanal::Sender<B>)>,
@@ -56,6 +81,8 @@ pub struct Loader<B> {
 }
 
 impl<B: OwnedWriteBuffer + Send + 'static> Loader<B> {
+    /// Creates a new loader that will run in a blocking task. The callback will
+    /// be called for every request to the loader.
     pub fn new_blocking(
         width: u32,
         height: u32,
@@ -73,6 +100,9 @@ impl<B: OwnedWriteBuffer + Send + 'static> Loader<B> {
         })
     }
 
+    /// Creates a new loader that will run in a blocking task. The callback will
+    /// be called once inside the created task and is expected to repeatedly wait for
+    /// requests over the callback's receiver channel.
     pub fn new_blocking_manual_recv(
         width: u32,
         height: u32,
@@ -91,8 +121,7 @@ impl<B: OwnedWriteBuffer + Send + 'static> Loader<B> {
         }
     }
 
-    /// # Errors
-    /// loader doesn't exist anymore
+    /// Sends a request to `self` with the given buffer.
     pub fn give(&self, buf: B) -> Result<Ticket<B>> {
         let (buf_send, buf_recv) = kanal::bounded(1);
         self.req_send
@@ -103,6 +132,7 @@ impl<B: OwnedWriteBuffer + Send + 'static> Loader<B> {
 }
 
 impl<B1: OwnedWriteBuffer + 'static, B2: OwnedWriteBuffer + 'static> Loader<(B1, B2)> {
+    /// Sends a request to `self` with the 2 given buffers.
     pub fn give2(&self, buf1: B1, buf2: B2) -> Result<Ticket<(B1, B2)>> {
         let (buf_send, buf_recv) = kanal::bounded(1);
         self.req_send
@@ -116,6 +146,8 @@ impl<B: OwnedWritable + Send + 'static> Loader<B>
 where
     for<'a> B::Inner<'a>: Send,
 {
+    /// Creates a new loader that will run in a normal async task. The callback will
+    /// be called for every request to the loader.
     pub fn new_async<F>(
         width: u32,
         height: u32,
@@ -136,6 +168,9 @@ where
         })
     }
 
+    /// Creates a new loader that will run in a normal async task. The callback will
+    /// be called once inside the created task and is expected to repeatedly wait for
+    /// requests over the callback's receiver channel.
     pub fn new_async_manual_recv<F>(
         width: u32,
         height: u32,
@@ -158,6 +193,9 @@ where
     }
 }
 
+/// Calls the callback for every ticket with the corresponding item and waits
+/// for all the futures to complete.
+#[inline]
 pub async fn collect_mapped_tickets<B: OwnedWriteBuffer + Send, K: Sync, T: FrameSize + Sync, O>(
     tickets: Vec<Ticket<B>>,
     items: impl IntoIterator<Item = T>,
@@ -176,6 +214,8 @@ pub async fn collect_mapped_tickets<B: OwnedWriteBuffer + Send, K: Sync, T: Fram
     // })
 }
 
+/// Calls [`Ticket::take`] for every ticket, waits for them to complete and gets
+/// rid of the results.
 #[inline]
 pub async fn discard_tickets<B: OwnedWriteBuffer + Send>(tickets: Vec<Ticket<B>>) {
     join_all(tickets.into_iter().map(|ticket| async move {
@@ -184,6 +224,7 @@ pub async fn discard_tickets<B: OwnedWriteBuffer + Send>(tickets: Vec<Ticket<B>>
     .await;
 }
 
+/// Calls [`Ticket::block_take`] for every ticket, and gets rid of the results.
 #[inline]
 pub fn block_discard_tickets<B: OwnedWriteBuffer>(tickets: Vec<Ticket<B>>) {
     for ticket in tickets {
@@ -191,19 +232,24 @@ pub fn block_discard_tickets<B: OwnedWriteBuffer>(tickets: Vec<Ticket<B>>) {
     }
 }
 
+/// Represents a buffer response from a [`Loader`] that could happen.
 pub struct Ticket<R>(kanal::Receiver<R>);
 
 impl<R> Ticket<R> {
+    /// Blocks while waiting for a response from the loader.
     /// # Errors
-    /// loading thread exited
+    /// Returns [`Error::BufferLost`] if it no longer possible for a response to
+    /// happen, like if the loader exited.
     pub fn block_take(self) -> Result<R> {
         self.0.recv().map_err(|_| Error::BufferLost)
     }
 }
 
 impl<R: Send> Ticket<R> {
+    /// Waits for a response from the loader.
     /// # Errors
-    /// loading thread exited
+    /// Returns [`Error::BufferLost`] if it no longer possible for a response to
+    /// happen, like if the loader exited.
     pub async fn take(self) -> Result<R> {
         self.0
             .to_async()

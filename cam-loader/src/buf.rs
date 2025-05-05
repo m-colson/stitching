@@ -1,89 +1,19 @@
-use std::{
-    borrow::Cow,
-    ops::{Deref, DerefMut},
-};
-
+/// Used to represent types that could contain an image/frame.
 pub trait FrameSize {
+    /// Width of the image.
     fn width(&self) -> usize;
+    /// Height of the image.
     fn height(&self) -> usize;
+    /// Channel count for the image.
     fn chans(&self) -> usize;
 
+    /// Returns ([`FrameSize::width`], [`FrameSize::height`], [`FrameSize::chans`]).
     fn frame_size(&self) -> (usize, usize, usize) {
         (self.width(), self.height(), self.chans())
     }
 
+    /// Returns image size in bytes.
     fn num_bytes(&self) -> usize {
         self.width() * self.height() * self.chans()
-    }
-
-    fn as_empty_view(&self) -> FrameBufferView<'static> {
-        FrameBufferView::new(self.frame_size(), &[])
-    }
-}
-
-pub trait PixelBufferExt: Deref<Target = [u8]> + FrameSize {
-    fn pixel_at(&self, x: usize, y: usize) -> Option<&[u8]> {
-        (x < self.width() && y < self.height()).then(|| {
-            let chans = self.chans();
-            &self[(x + (y * self.height())) * chans..][..chans]
-        })
-    }
-
-    fn pixel_iter(&self) -> Box<dyn Iterator<Item = &[u8]> + '_> {
-        let chans = self.chans();
-        Box::new(self.chunks(chans))
-    }
-}
-
-impl<T: Deref<Target = [u8]> + FrameSize> PixelBufferExt for T {}
-
-pub trait PixelBufferMutExt: DerefMut<Target = [u8]> + FrameSize {
-    fn pixel_iter_mut(&mut self) -> Box<dyn Iterator<Item = &mut [u8]> + '_> {
-        let chans = self.chans();
-        Box::new(self.chunks_mut(chans))
-    }
-}
-
-impl<T: DerefMut<Target = [u8]> + FrameSize> PixelBufferMutExt for T {}
-
-pub struct FrameBufferView<'a> {
-    data: Cow<'a, [u8]>,
-    width: usize,
-    height: usize,
-    chans: usize,
-}
-
-impl<'a> FrameBufferView<'a> {
-    #[must_use]
-    #[inline]
-    pub const fn new(size: (usize, usize, usize), data: &'a [u8]) -> Self {
-        Self {
-            data: Cow::Borrowed(data),
-            width: size.0,
-            height: size.1,
-            chans: size.2,
-        }
-    }
-}
-
-impl FrameSize for FrameBufferView<'_> {
-    fn width(&self) -> usize {
-        self.width
-    }
-
-    fn height(&self) -> usize {
-        self.height
-    }
-
-    fn chans(&self) -> usize {
-        self.chans
-    }
-}
-
-impl Deref for FrameBufferView<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
     }
 }

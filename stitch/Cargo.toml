@@ -20,6 +20,7 @@ kanal.workspace = true
 serde = { workspace = true, features = ["derive"] }
 smpgpu = { path = "../smpgpu", optional = true, features = [
     "tokio_task_poller",
+    "obj-file",
 ] }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }

@@ -13,12 +13,12 @@ mod texture;
 
 pub use bind::{AsBinding, AutoVisBindable, Bindings, VisBindable};
 pub use buffer::{
+    Buffer, BufferBuilder,
     typed::{IndexBuffer, StorageBuffer, Uniform, VertexBuffer},
-    Buffer,
 };
 pub use cmd::{
-    AsRenderItem, Checkpoint, ColorAttachment, ComputeCheckpoint, ComputeItem, CopyOp,
-    DepthAttachment, FragTarget, Pass, RenderCheckpoint, RenderItem,
+    AsRenderItem, Checkpoint, ColorAttachment, CommandBuilder, ComputeCheckpoint, ComputeItem,
+    CopyOp, DepthAttachment, FragTarget, Pass, RenderCheckpoint, RenderItem,
 };
 pub use ctx::Context;
 pub mod global;

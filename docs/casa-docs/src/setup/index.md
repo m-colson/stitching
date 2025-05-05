@@ -1,3 +1,3 @@
 # Setup
 
-This section contains the step to setup a fresh system.
+This section contains the steps to setup a fresh system.

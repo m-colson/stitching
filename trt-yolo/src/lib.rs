@@ -1,79 +1,27 @@
+//! This crate makes it simple to use a [YOLO](https://docs.ultralytics.com/models/yolo11/) model with [`tensorrt`].
+//!
+//! Start by looking at the [`Which`] enum.
+
+#![warn(missing_docs)]
+
 use std::path::Path;
 use strum::VariantArray;
-use tensorrt::ExecutionContext;
 
 pub use tensorrt::{CudaBuffer, CudaError, CudaStream, RuntimeEngineContext};
 
 pub mod boxes;
 pub mod coco;
 
-pub use boxes::{nms_cpu, BoundingClass};
+pub use boxes::{nms_to_bounding, BoundingClass};
 
-pub struct Inferer<'a> {
-    ctx: ExecutionContext<'a>,
-    stream: CudaStream,
-    in_mem: CudaBuffer,
-    in_byte_count: usize,
-    out_mem: CudaBuffer,
-    out_byte_count: usize,
-}
-
-impl<'a> Inferer<'a> {
-    pub fn from_exec_ctx(ctx: ExecutionContext<'a>, in_elems: usize, out_elems: usize) -> Self {
-        let in_byte_count = in_elems * size_of::<u8>();
-        let out_byte_count = out_elems * size_of::<half::f16>();
-
-        let stream = CudaStream::new().expect("failed to create cuda stream");
-
-        let in_mem = CudaBuffer::new(in_byte_count).expect("failed to create input cuda buffer");
-        ctx.set_input_tensor(c"images", &in_mem);
-
-        let mut out_mem =
-            CudaBuffer::new(out_byte_count).expect("failed to create output cuda buffer");
-        ctx.set_output_tensor(c"output0", &mut out_mem);
-
-        Self {
-            ctx,
-            stream,
-            in_mem,
-            in_byte_count,
-            out_mem,
-            out_byte_count,
-        }
-    }
-
-    pub fn run(&mut self, in_buf: &[u8], out_buf: &mut [half::f16]) {
-        if size_of_val(in_buf) != self.in_byte_count {
-            panic!(
-                "in_buf size mismatch, got: {:?} expected: {:?}",
-                size_of_val(in_buf),
-                self.in_byte_count,
-            )
-        }
-
-        if size_of_val(out_buf) != self.out_byte_count {
-            panic!(
-                "out_buf size mismatch, got: {:?} expected: {:?}",
-                size_of_val(out_buf),
-                self.out_byte_count,
-            )
-        }
-
-        self.in_mem
-            .copy_from_async(bytemuck::cast_slice(in_buf), &self.stream)
-            .unwrap();
-        self.ctx.enqueue(&self.stream);
-        self.out_mem
-            .copy_to_async(bytemuck::cast_slice_mut(out_buf), &self.stream)
-            .unwrap();
-        self.stream.synchronize().unwrap();
-    }
-}
-
+/// This represents the kind of YOLO model you want to use. Since the ONNX file
+/// for the model will be included in the build, which could be large, you can enable or disable
+/// different variants using the features flags of this crate.
 #[derive(Clone, Copy, Debug, VariantArray)]
 pub enum Which {
     // #[cfg(feature = "v11n")]
     // V11N,
+    /// YOLO V11 Small
     #[cfg(feature = "v11s")]
     V11S,
     // #[cfg(feature = "v11m")]
@@ -85,18 +33,21 @@ pub enum Which {
 }
 
 impl Which {
+    /// Returns the fastest variant of [`Which`] based on the enabled feature flags.
     pub fn fastest() -> Self {
         *Self::VARIANTS
             .first()
             .expect("no models added to this binary")
     }
 
+    /// Returns the best variant of [`Which`] based on the enabled feature flags.
     pub fn best() -> Self {
         *Self::VARIANTS
             .last()
             .expect("no models added to this binary")
     }
 
+    /// Returns the input tensor shape for the `self`.
     pub fn input_shape(self) -> [usize; 4] {
         match self {
             // #[cfg(feature = "v11n")]
@@ -112,10 +63,12 @@ impl Which {
         }
     }
 
+    /// Returns the total number of elements in the input tensor for `self`.
     pub fn input_elems(self) -> usize {
         self.input_shape().into_iter().product()
     }
 
+    /// Returns the output tensor shape for `self`.
     pub fn out_shape(self) -> [usize; 3] {
         match self {
             // #[cfg(feature = "v11n")]
@@ -131,10 +84,13 @@ impl Which {
         }
     }
 
+    /// Returns the total number of elements in the output tensor for `self`.
     pub fn out_elems(self) -> usize {
         self.out_shape().into_iter().product()
     }
 
+    /// Returns a static included byte slice containing the ONNX-based
+    /// description of `self`.
     pub fn onnx_data(self) -> &'static [u8] {
         match self {
             // #[cfg(feature = "v11n")]
@@ -150,6 +106,13 @@ impl Which {
         }
     }
 
+    /// Returns a new boxed byte slice containing the TensorRT plan for `self`.
+    ///
+    /// These plans are architecture specific so they must be generated on the
+    /// target machine. This function will check `$HOME/.cache/tensorrt-plans`
+    /// for a plan with the correct name and return that if found. Otherwise, the
+    /// plan will be generated, which takes a decently long time, cached and
+    /// returned.
     pub fn plan_data(self) -> std::io::Result<Box<[u8]>> {
         let name = match self {
             // #[cfg(feature = "v11n")]

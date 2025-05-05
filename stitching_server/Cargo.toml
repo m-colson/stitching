@@ -50,7 +50,7 @@ zerocopy = { version = "0.8.9", features = ["alloc"] }
 flate2 = { version = "1.0.35", default-features = false, features = [
     "zlib-rs",
 ] }
-cam-loader = { version = "0.1.0", path = "../cam-loader" }
+cam-loader = { version = "0.1.0", path = "../cam-loader", features = ["serde"] }
 qoi = "0.4.1"
 chrono = "0.4.40"
 serde.workspace = true

@@ -1,3 +1,10 @@
+//! Unsafe bindings to
+//! [TensorRT](https://docs.nvidia.com/deeplearning/tensorrt/latest/_static/c-api/index.html)
+//! based on the C++ headers.
+//!
+//! It will use the pre-generated bindings included in this crate unless
+//! the `build` feature flag is enabled.
+
 pub(crate) mod bind {
     #![allow(non_upper_case_globals, non_camel_case_types, non_snake_case)]
 

@@ -1,5 +1,11 @@
+//! This crate contains some types and macros that make it a bit easier to interop
+//! C++ code.
+
+#![warn(missing_docs)]
+
 pub mod container;
 
+/// Represents a virtual destructor in a C++ class' vtable.
 #[cfg(target_os = "windows")]
 #[repr(C)]
 #[derive(PartialEq, Eq)]
@@ -7,6 +13,7 @@ pub struct DestructorVEntry<T> {
     vec_delete: unsafe extern "C" fn(this: *mut T, n: core::ffi::c_uint),
 }
 
+/// Represents a virtual destructor in a C++ class' vtable.
 #[cfg(target_os = "linux")]
 #[repr(C)]
 #[derive(PartialEq, Eq)]
@@ -24,6 +31,7 @@ impl<T> Copy for DestructorVEntry<T> {}
 
 #[cfg(target_os = "windows")]
 impl<T> DestructorVEntry<T> {
+    /// Creates a new destructor that will panic if called.
     pub const fn new() -> Self {
         extern "C" fn vec_delete<T>(_this: *mut T, n: core::ffi::c_uint) {
             todo!(
@@ -43,6 +51,7 @@ impl<T> DestructorVEntry<T> {
 
 #[cfg(target_os = "linux")]
 impl<T> DestructorVEntry<T> {
+    /// Creates a new destructor that will panic if called.
     pub const fn new() -> Self {
         extern "C" fn complete_destroy<T>(_this: *mut T) {
             println!(
@@ -74,6 +83,25 @@ impl<T> Default for DestructorVEntry<T> {
     }
 }
 
+/// Helps create C++ like vtables using a Rust-like syntax.
+///
+/// For example:
+/// ```
+/// make_vtable! {
+///     FooVTable for Foo {
+///         destructor;
+///         fn mutable_foo(a: i32) -> u32;
+///         const fn const_foo(a: i32) -> u32;
+///     }
+/// }
+/// ```
+/// This will generate a struct named FooVTable with a field for:
+/// - destruct: [`DestructorVEntry`]
+/// - mutable_foo: `unsafe extern "C" fn(this: *mut Foo, a: i32) -> u32`
+/// - const_foo: `unsafe extern "C" fn(this: *const Foo, a: i32) -> u32`
+///
+/// It will also create an `impl Foo` with the same function names that will
+/// call to the underlying vtable function, making its usage much more ergonomic.
 #[macro_export]
 macro_rules! make_vtable {
     ($t:ident for $dt:ty { $($fields:tt)* }) => {

@@ -1,0 +1,99 @@
+[server]
+host = "0.0.0.0"
+port = 80
+asset_dir = "/home/casa/casa-src/stitching_server/assets"
+
+[world.cylinder]
+radius = 216
+# height = 150
+
+#-- NOTE: all coordinates are in centimeters --#
+
+[model]
+path = "/home/casa/casa-src/assets/plane_v6.obj"
+origin = [17.1586177, -5.239844, 3.0231295]
+scale = [0.1, 0.1, 0.1]                          # obj file is in mm
+rot = [0, 90, 90]
+light_dir = [1, 1, -0.5]
+
+# [view.orthographic]
+# radius = 500
+# pos = [0, 0, 100]
+
+# [view.perspective]
+# fov_y = 80
+# pos = [30, -10, 25]
+# look_at = [0, 0, 16]
+
+[view.orbit]
+fov_y = 80
+dist = 50
+z = 30
+look_at = [0, 0, 10]
+frame_per_rev = 500
+
+#-- NOTE: this order of cameras is expected in the UI --#
+
+[[cameras]]
+pos = [0, -3.358, 5.211]
+pitch = 32.66
+azimuth = -3
+roll = 0
+sensor = { img_off = [0, 40], fov.D = 175.6 }
+lens = "equisolid"
+resolution = [1920, 1080]
+framerate = 30
+
+mask_path = "/home/casa/casa-src/assets/bottom-mask.png"
+
+v4l.index = 6
+# pattern.color = [255, 40, 150]
+# image = "capture0.png"
+
+[[cameras]]
+pos = [0, -18.157, 26.642]
+pitch = 25
+azimuth = -3
+roll = -1
+sensor = { img_off = [0, 55], fov.D = 175.6 }
+lens = "equisolid"
+resolution = [1920, 1080]
+framerate = 30
+
+mask_path = "/home/casa/casa-src/assets/tail-mask.png"
+
+v4l.index = 2
+# pattern.color = [255, 90, 60]
+# image = "capture1.png"
+
+[[cameras]]
+pos = [-5.348, -11.422, 13.626]
+pitch = 0
+azimuth = -125
+roll = 180
+sensor = { img_off = [-20,-15], fov.D = 160 }
+lens = "equisolid"
+resolution = [1920, 1442]
+framerate = 21
+
+mask_path = "/home/casa/casa-src/assets/left-mask.png"
+
+argus = { index = 0, mode = 0 }
+# pattern.color = [0, 255, 0]
+# image = "capture2.png"
+
+[[cameras]]
+pos = [5.348, -11.422, 13.625]
+pitch = 0
+azimuth = 125
+roll = 180
+sensor = { img_off = [-20,-15], fov.D = 160 }
+lens = "equisolid"
+resolution = [1920, 1442]
+framerate = 21
+
+mask_path = "/home/casa/casa-src/assets/right-mask.png"
+
+argus = { index = 1, mode = 0 }
+# pattern.color = [0, 0, 255]
+# image = "capture3.png"

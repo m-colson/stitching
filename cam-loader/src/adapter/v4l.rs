@@ -1,3 +1,5 @@
+//! See the [`from_spec`] function.
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +21,15 @@ pub struct Config {
     pub controls: HashMap<String, i64>,
 }
 
+/// Opens the requested [`v4l::Device`] at `index`, sets any desired `controls` params
+/// and opens a [`v4l::io::mmap::Stream`] for the device. It returns a different
+/// cam-loader depending on the format the device returns every frame.]
+///
+/// NOTE: Currently, only "MJPG" is supported.
+///
+/// # Errors
+/// Returns an Error if any v4l operation fails. Most likely to be that device
+/// doesn't exist, couldn't have its parameters updated or timed-out.
 pub fn from_spec<B: OwnedWriteBuffer + Send + 'static>(
     cam_spec: &super::Config,
     Config { index, controls }: Config,
@@ -123,6 +134,8 @@ pub fn from_spec<B: OwnedWriteBuffer + Send + 'static>(
     }
 }
 
+/// Creates a new loader that receives frames from the stream and uses [`mozjpeg`]
+/// to decompress the image into the request buffer.
 #[inline]
 fn new_jpeg_loader<B: OwnedWriteBuffer + Send + 'static>(
     index: usize,

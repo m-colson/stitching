@@ -1,3 +1,10 @@
+//! Unsafe bindings to the
+//! [Libargus API](https://docs.nvidia.com/jetson/archives/r36.4.3/ApiReference/group__LibargusAPI.html)
+//! based on the C++ headers.
+//!
+//! It will use the pre-generated bindings included in this crate unless
+//! the `build` feature flag is enabled.
+
 #![allow(clippy::missing_safety_doc)]
 
 mod bind {

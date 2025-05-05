@@ -155,7 +155,14 @@
 
     async function changeView(num) {
       await fetch(`/settings/view/${num}`, { method: "PUT" })
-    } 
+    }
+
+    window.addEventListener("load", () => {
+      document.getElementById("sensitivity").addEventListener("change", async (e) => {
+        await fetch(`/settings/min-score/${e.target.value}`, { method: "PUT" })
+      });
+    })
+
   </script>
 </head>
 
@@ -166,9 +173,6 @@
     <h1>Camera for Situation Awareness</h1>
   </div>
 
-  <!-- <div class="panorama"> -->
-  <!-- </div> -->
-
   <div class="view-selector">
     <button style="background-color: #8cdbff;" onclick="changeView(-1)">Orbit</button>
     <button style="background-color: #8cff96;" onclick="changeView(0)">Top-down</button>
@@ -177,6 +181,7 @@
     <button onclick="changeView(2)">Tail</button>
     <button onclick="changeView(3)">Left</button>
     <button onclick="changeView(4)">Right</button>
+    <input type="range" min="1" max="100" value="50" class="slider" id="sensitivity">
   </div>
 </body>
 

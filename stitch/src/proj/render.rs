@@ -1,6 +1,6 @@
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
-use cam_loader::{Loader, OwnedWritable, OwnedWriteBuffer, buf::FrameSize, util::log_recv_err};
+use cam_loader::{FrameSize, Loader, OwnedWritable, OwnedWriteBuffer, util::log_recv_err};
 use encase::ShaderType;
 use glam::{Mat4, UVec2};
 use smpgpu::{
@@ -17,11 +17,9 @@ use crate::{
     camera::{Camera, Config, ViewParams},
 };
 
-use super::{ViewStyle, WorldStyle};
+use super::{MaskLoaderConfig, ViewStyle, WorldStyle};
 
-#[derive(Clone, Debug)]
-pub struct InverseView(pub Mat4);
-
+/// Contains the settings and gpu buffers needed for projection.
 pub struct GpuProjector {
     out_size: (usize, usize),
 
@@ -34,7 +32,10 @@ pub struct GpuProjector {
     bounds: Arc<GpuBounds>,
 }
 
+/// Contains the buffers that contain the input settings, frame data and mask data.
 struct GpuInputs {
+    /// Storage buffer containing ALL camera's frames back-to-back.
+    /// Each pixel is a u32 containing the bytes with a RGBA format.
     pub frames: Arc<StorageBuffer<u32>>,
     pub specs: StorageBuffer<InputSpec>,
     pub sizes: Vec<glam::UVec2>,
@@ -43,6 +44,7 @@ struct GpuInputs {
 }
 
 impl GpuInputs {
+    /// Creates the input buffers that can contain each camera's frame and loads the mask images.
     pub fn new(sizes: &[UVec2], mask_paths: &[Option<PathBuf>]) -> Self {
         let ranges = sizes
             .iter()
@@ -226,14 +228,19 @@ impl Vertex {
     }
 }
 
+/// Represents a single bouding box vertex.
 #[derive(ShaderType, Clone, Copy, Debug)]
 pub struct TexturedVertex {
+    /// The 3d-coordinate of the vertex, pos.w is 1.
     pub pos: glam::Vec4,
+    /// The RGBA color components (0-1) of the vertex.
     pub color: glam::Vec4,
+    /// The location of the vertex in to the bounding box.
     pub text_coord: glam::Vec2,
 }
 
 impl TexturedVertex {
+    /// Create a new vertex at `[x,y,z]`, texture coordinate `[tx,ty]` and the provided `color`.
     #[inline]
     pub fn new(x: f32, y: f32, z: f32, tx: f32, ty: f32, color: glam::Vec3) -> Self {
         Self {
@@ -243,6 +250,7 @@ impl TexturedVertex {
         }
     }
 
+    /// Create a new vertex at `pos`, texture coordinate `[tx,ty]` and the provided `color`.
     #[inline]
     pub fn from_pos(pos: glam::Vec4, tx: f32, ty: f32, color: glam::Vec3) -> Self {
         Self {
@@ -253,6 +261,7 @@ impl TexturedVertex {
     }
 }
 
+/// Stores the settings needed to create a [`GpuProjector`].
 pub struct GpuProjectorBuilder<'a> {
     input_sizes: Vec<glam::UVec2>,
     out_size: (usize, usize),
@@ -268,11 +277,13 @@ pub struct GpuProjectorBuilder<'a> {
     model_rot: glam::Vec3,
 }
 
+/// Stores settings needed for the model not already in [`smpgpu::model::ModelBuilder`].
 pub struct ModelOptions {
     pub light_dir: Uniform<glam::Vec3>,
 }
 
 impl<'a> GpuProjectorBuilder<'a> {
+    /// Creates a new builder with default settings.
     const fn new() -> Self {
         Self {
             input_sizes: Vec::new(),
@@ -287,6 +298,7 @@ impl<'a> GpuProjectorBuilder<'a> {
         }
     }
 
+    /// Adds inputs with `input_sizes` to the settings.
     pub fn input_sizes<T: Into<glam::UVec2>>(
         mut self,
         input_sizes: impl IntoIterator<Item = T>,
@@ -296,21 +308,25 @@ impl<'a> GpuProjectorBuilder<'a> {
         self
     }
 
+    /// Sets the size of the primary view to `w`x`h`.
     pub const fn out_size(mut self, w: usize, h: usize) -> Self {
         self.out_size = (w, h);
         self
     }
 
+    /// Sets a new world mesh based on the world style. See [`WorldStyle::make_mesh`].
     pub fn world(mut self, world: &WorldStyle) -> Self {
         (self.world_verts, self.world_idxs) = world.make_mesh();
         self
     }
 
-    pub fn masks_from_cfgs(mut self, cfgs: &[Config<cam_loader::Config>]) -> Self {
+    /// Sets the paths to the camera masks from the provided camera configs.
+    pub fn masks_from_cfgs(mut self, cfgs: &[Config<MaskLoaderConfig>]) -> Self {
         self.mask_paths = cfgs.iter().map(|c| c.meta.mask_path.clone()).collect();
         self
     }
 
+    /// Constructs or reuses a [`ModelBuilder`] and gives it to the callback to configure further.
     pub fn model(
         mut self,
         f: impl FnOnce(
@@ -330,21 +346,25 @@ impl<'a> GpuProjectorBuilder<'a> {
         self
     }
 
+    /// Sets the model origin.
     pub fn model_origin(mut self, origin: [f32; 3]) -> Self {
         self.model_origin = origin.into();
         self
     }
 
+    /// Sets the model axis scales.
     pub fn model_scale(mut self, scale: [f32; 3]) -> Self {
         self.model_scale = scale.into();
         self
     }
 
+    /// Sets the model rotation angles, in degrees.
     pub fn model_rot_deg(mut self, angles: [f32; 3]) -> Self {
         self.model_rot = angles.map(|v| v.to_radians()).into();
         self
     }
 
+    /// Creates a [`GpuProjector`] using `self`'s settings.
     pub fn build(self) -> GpuProjector {
         let pass_info = uniform("pass_info")
             .writable()
@@ -389,11 +409,14 @@ impl<'a> GpuProjectorBuilder<'a> {
 }
 
 impl GpuProjector {
+    /// Creates a new [`GpuProjectorBuilder`].
     #[inline]
     pub fn builder() -> GpuProjectorBuilder<'static> {
         GpuProjectorBuilder::new()
     }
 
+    /// Creates a [`ProjectionView`] with the provided width, height and [`ViewStyle`].
+    /// Will render the world, model (if given), and bounding boxes.
     pub fn create_vis_view<B>(&self, w: usize, h: usize, init_view: ViewStyle) -> ProjectionView<B>
     where
         B: OwnedWriteBuffer + Send + 'static,
@@ -491,6 +514,8 @@ impl GpuProjector {
         }
     }
 
+    /// Creates a [`ProjectionView`] with the provided width, height and [`ViewStyle`].
+    /// Will only render the world but returns the (image data, f32 vertex depths).
     pub fn create_depth_view<B1, B2>(&self, w: usize, h: usize) -> ProjectionView<(B1, B2)>
     where
         B1: OwnedWriteBuffer + Send + 'static,
@@ -571,10 +596,12 @@ impl GpuProjector {
         }
     }
 
+    /// Sets the vertices for the rendered bounding boxes.
     pub async fn update_bounding_verts(&mut self, vs: &[TexturedVertex]) {
         self.bounds.update(vs).await;
     }
 
+    /// Sets the input specifications based on the provided cameras' views.
     #[inline]
     pub fn update_cam_specs<T>(&self, cams: &[Camera<T>]) {
         self.inp.specs.set_global(
@@ -585,6 +612,7 @@ impl GpuProjector {
         );
     }
 
+    /// Send requests to each camera for the next frame. See [`Loader::give`].
     #[inline]
     pub fn take_input_buffers(
         &self,
@@ -616,6 +644,8 @@ impl GpuProjector {
     }
 }
 
+/// Handle to a projector and the channels to retrieve projected frames and
+/// send updates.
 pub struct ProjectionView<B> {
     loader: Loader<B>,
     update_send: kanal::Sender<ProjUpdater>,
@@ -626,6 +656,7 @@ pub enum ProjUpdater {
 }
 
 impl<B> ProjectionView<B> {
+    /// Mutate the projector's current [`ViewStyle`].
     pub fn update_view(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) -> Result<()> {
         self.update_send
             .send(ProjUpdater::View(Box::new(f)))
@@ -634,6 +665,7 @@ impl<B> ProjectionView<B> {
 }
 
 impl<B: OwnedWriteBuffer + Send + 'static> ProjectionView<B> {
+    /// Load a stitched view into `buf` and wait for it to be updated.
     pub async fn load_image(&self, buf: B) -> Result<B> {
         let ticket = self.loader.give(buf)?;
         let buf = ticket.take().await?;
@@ -644,6 +676,7 @@ impl<B: OwnedWriteBuffer + Send + 'static> ProjectionView<B> {
 impl<B1: OwnedWriteBuffer + Send + 'static, B2: OwnedWriteBuffer + Send + 'static>
     ProjectionView<(B1, B2)>
 {
+    /// Load a stitch view and depth data into buf1 and buf2 and wait for it to be updated.
     pub async fn load_image2(&self, buf1: B1, buf2: B2) -> Result<(B1, B2)> {
         let ticket = self.loader.give2(buf1, buf2)?;
         let buf = ticket.take().await?;
@@ -651,6 +684,7 @@ impl<B1: OwnedWriteBuffer + Send + 'static, B2: OwnedWriteBuffer + Send + 'stati
     }
 }
 
+/// Contains a shared reference to a [`StorageBuffer`] and the location to save a result to.
 pub struct GpuDirectBufferWrite {
     ctx: Arc<Context>,
     buf: Arc<StorageBuffer<u32>>,
@@ -678,34 +712,44 @@ impl OwnedWriteBuffer for GpuDirectBufferWrite {
     }
 }
 
+/// Wrapper over a list of `f32`s that stores the depth data found during the
+/// rendering of a depth view.
 pub struct DepthData<'a>(Cow<'a, [f32]>, u32, u32);
 
 impl DepthData<'_> {
+    /// Creates a new buffer than can store data for an image of size `width`x`height`.
     #[inline]
     pub fn new_zeroed(width: usize, height: usize) -> Self {
         Self(vec![0.0; width * height].into(), width as _, height as _)
     }
 
+    /// Copies `src` into the `self`.
+    /// # Panics
+    /// This function will panic if `self` and `src` have different lengths.
     #[inline]
     pub fn copy_from(&mut self, src: &'_ [f32]) {
         self.0.to_mut().copy_from_slice(src);
     }
 
+    /// Returns the depth at `x` and `y` in `self`.
     #[inline]
     pub fn at(&self, x: u32, y: u32) -> f32 {
         self.0[(x.min(self.1 - 1) + y.min(self.2 - 1) * self.1) as usize]
     }
 
+    /// Returns another [`DepthData`] that references `self` instead of cloning.
     #[inline]
     pub fn to_ref(&self) -> DepthData<'_> {
         DepthData(Cow::Borrowed(&self.0), self.1, self.2)
     }
 
+    /// Returns the total amount of elements in `self`.
     #[inline]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    /// Returns true if `self` has no elements.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

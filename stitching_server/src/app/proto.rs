@@ -1,3 +1,5 @@
+//! This module contains types for the client-server communication protocol.
+
 use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, OnceLock},
@@ -5,23 +7,31 @@ use std::{
 };
 
 use axum::extract::ws::Message;
-use cam_loader::{OwnedWriteBuffer, buf::FrameSize};
+use cam_loader::{FrameSize, OwnedWriteBuffer};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, little_endian};
 
+/// Named `u8` mapping to the packet kind number.
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
-enum PacketKind {
+pub enum PacketKind {
+    /// Packet that does nothing.
     Nop = 0,
+    /// Packet containing the data for a new frame.
     UpdateFrame = 2,
+    /// Packet containing client timing info.
     Timing = 4,
 }
 
+/// Packets that could have been sent by the client.
 pub enum RecvPacket {
+    /// Packet that does nothing.
     Nop,
+    /// Packet containing client timing info.
     Timing(TimingPacket),
 }
 
 impl RecvPacket {
+    /// Creates a [`RecvPacket`] based on the provided bytes.
     pub fn from_raw(data: &[u8]) -> Option<Self> {
         (data[0] == PacketKind::Nop as _)
             .then_some(Self::Nop)
@@ -29,9 +39,12 @@ impl RecvPacket {
     }
 }
 
+/// Stores the raw data of a video packet including the
+/// Packet Kind, Width, Height, Num of Channels, Server Send Time and raw data.
 pub struct VideoPacket(Arc<[u8]>);
 
 impl VideoPacket {
+    /// Creates a new video packet with the given width, height and channels.
     #[inline]
     pub fn new(width: usize, height: usize, chans: usize) -> stitch::Result<Self> {
         let mut inner = <[u8]>::new_box_zeroed_with_elems(width * height * chans + 16)
@@ -48,6 +61,7 @@ impl VideoPacket {
         Ok(Self(inner.into()))
     }
 
+    /// Updates the packet's server send time to the current time.
     #[inline]
     pub fn update_time(&mut self) {
         if let Some(inner) = &mut self.mut_inner_data() {
@@ -57,7 +71,10 @@ impl VideoPacket {
         }
     }
 
+    /// Converts the packets in a [`Message`] by QOI encoding the raw image in a new task, since the operation is blocking.
+    /// Must be `await`ed to get the result.
     #[inline]
+    #[must_use]
     pub fn to_message(&self) -> tokio::task::JoinHandle<Message> {
         let buf = self.0.clone();
         let w = self.width();
@@ -138,11 +155,17 @@ impl DerefMut for VideoPacket {
     }
 }
 
+/// Contains the data for a timing packet.
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Clone, Copy, Debug)]
+#[repr(C)]
 pub struct TimingPacket {
+    /// The packet kind with addition padding to ensure alignment is correct.
     _kind: u64,
+    /// The time at which the server finished creating the frame.
     pub server_send: f64,
+    /// The millisecond time at which the client received the frame.
     pub client_recv: f64,
+    /// The millisecond time at which the client sent this response packet.
     pub client_send: f64,
 }
 
@@ -153,6 +176,8 @@ impl TimingPacket {
         START_TIME.get_or_init(Instant::now)
     }
 
+    /// Creates a new timing packet with a [`TimingPacket::server_send`] of the
+    /// current time and NAN for the client times.
     #[inline]
     pub fn new_now() -> Self {
         let server_send = Self::base_instant().elapsed();
@@ -164,6 +189,8 @@ impl TimingPacket {
         }
     }
 
+    /// Creates a new timing packet from the `data` provided. Returns [`None`] if the
+    /// packet does not start with [`PacketKind::Timing`].
     pub fn from_raw(data: &[u8]) -> Option<Self> {
         if data[0] != PacketKind::Timing as _ {
             return None;
@@ -183,6 +210,7 @@ impl TimingPacket {
         Self::ref_from_bytes(&new_data.0).ok().cloned()
     }
 
+    /// Returns the amount of the time the (client spent processing the packet, latency to the client).
     #[inline]
     pub fn info_now(self) -> (Duration, Duration) {
         let server_recv = Self::base_instant().elapsed().as_secs_f64() * 1000.;

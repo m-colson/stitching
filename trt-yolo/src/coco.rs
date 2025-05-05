@@ -1,3 +1,7 @@
+//! This module contains the info related to the [COCO Dataset](https://cocodataset.org/).
+
+/// The names for all COCO classes based on their id.
+#[allow(missing_docs)]
 pub const NAMES: [&str; 80] = [
     "person",
     "bicycle",

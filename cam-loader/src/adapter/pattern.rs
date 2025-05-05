@@ -1,3 +1,5 @@
+//! See the [`from_spec`] function.
+
 use zerocopy::FromBytes;
 
 use crate::{
@@ -7,6 +9,9 @@ use crate::{
 
 use super::Config;
 
+/// Creates a loader that will fill the buffer with a grid pattern. The `color`
+/// is a RGB value for the "on" part of the grid, the "off" part is always black.
+/// The `grid_size` is the amount of pixels between color flips.
 pub fn from_spec<B: OwnedWriteBuffer + Send + 'static>(
     spec: &Config,
     color: [u8; 3],

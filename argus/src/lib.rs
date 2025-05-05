@@ -1,3 +1,13 @@
+//! Safe Rust wrapper types to access the
+//! [Libargus API](https://docs.nvidia.com/jetson/archives/r36.4.3/ApiReference/group__LibargusAPI.html).
+//!
+//! Most of Nvidia's C++ based docs apply to this crate aswell. There are a few difference however:
+//! - Objects will be dropped automatically at the end of their scope, since
+//!   they are not pointers.
+//! - `interface_cast` has been replaced with `as_interface` (or similar) methods.
+//! - There is a decent amount of functionality that does not have safe
+//!   bindings, as they were not needed.
+
 use std::{ffi, fmt::Debug, marker::PhantomData, time::Duration};
 
 use argus_sys::{BayerTuple, Range, Status};
@@ -26,13 +36,6 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-// fn status_result(s: argus_sys::Status) -> Result<()> {
-//     match s {
-//         argus_sys::Status::STATUS_OK => Ok(()),
-//         err => Err(Error(err)),
-//     }
-// }
 
 pub struct CameraProvider(*mut argus_sys::CameraProvider);
 

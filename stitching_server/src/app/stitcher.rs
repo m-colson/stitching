@@ -1,12 +1,21 @@
+//! This module contains the types and function that coordinate the rendering,
+//! object detection, and message generation tasks.
+
 use std::{fs::File, io::BufReader, time::Duration};
 
 use axum::extract::ws::Message;
-use cam_loader::{Loader, OwnedWriteBuffer, buf::FrameSize};
+use cam_loader::{FrameSize, Loader, OwnedWriteBuffer};
 use stitch::{
     Result,
     camera::Camera,
-    proj::{self, GpuDirectBufferWrite, GpuProjector, ProjectionView, TexturedVertex, ViewStyle},
+    proj::{
+        self, GpuDirectBufferWrite, GpuProjector, MaskLoaderConfig, ProjectionView, TexturedVertex,
+        ViewStyle,
+    },
 };
+
+#[cfg(feature = "trt")]
+use stitch::proj::DepthData;
 
 use crate::util::IntervalTimer;
 
@@ -14,19 +23,28 @@ use crate::util::IntervalTimer;
 use crate::infer_host::InferHost;
 
 use super::proto::VideoPacket;
+
+/// Messages that can be sent to the stitcher to update parameters.
 pub enum StitchUpdate {
+    /// Mutate the sticher's current view style
     ViewStyle(Box<dyn FnOnce(&mut ViewStyle) + Send>),
     #[allow(dead_code)] // never constructed when trt feature disabled
+    /// Set the stitcher's detection bounding boxes to the provided list of
+    /// [`TexturedVertex`]s.
     Bounds(Vec<TexturedVertex>),
 }
 
 #[cfg(feature = "trt")]
+/// Messages that can be sent to the stitcher's [`InferHost`] to update parameters.
 pub enum InferUpdate {
+    /// Set host's min IOU value.
     MinIOU(f32),
+    /// Set host's minimum confidence score.
     MinScore(f32),
 }
 
-pub struct Sticher {
+/// Handle to a stitcher with the channels necessary to send and receive messages.
+pub struct Stitcher {
     msg_recv: kanal::AsyncReceiver<Message>,
     stitch_update_send: kanal::Sender<StitchUpdate>,
 
@@ -34,16 +52,14 @@ pub struct Sticher {
     infer_update_send: kanal::Sender<InferUpdate>,
 }
 
-impl Sticher {
-    pub fn from_cfg_gpu(
-        cfg: proj::Config<cam_loader::Config>,
-        proj_w: usize,
-        proj_h: usize,
-    ) -> Self {
+impl Stitcher {
+    /// Creates a new stitcher based on `cfg` and the primary view's width and
+    /// height.
+    pub fn from_cfg_gpu(cfg: proj::Config<MaskLoaderConfig>, proj_w: usize, proj_h: usize) -> Self {
         let cam_resolutions = cfg
             .cameras
             .iter()
-            .map(|c| c.meta.resolution)
+            .map(|c| c.meta.loader.resolution)
             .collect::<Vec<_>>();
 
         let mut proj_builder = GpuProjector::builder()
@@ -74,7 +90,6 @@ impl Sticher {
         #[cfg(feature = "trt")]
         let infer_update_send = {
             use std::f32::consts::PI;
-            use stitch::proj::DepthData;
 
             const NUM_SUBS: i32 = 8;
 
@@ -166,10 +181,12 @@ impl Sticher {
         }
     }
 
+    /// Wait until the stitcher has a new [`Message`] to send to the client.
     pub async fn next_frame_msg(&self) -> Option<Message> {
         self.msg_recv.recv().await.ok()
     }
 
+    /// Mutate the stitcher's view style with the provided callback.
     pub fn update_view_style(&self, f: impl FnOnce(&mut ViewStyle) + Send + 'static) {
         _ = self
             .stitch_update_send
@@ -177,10 +194,12 @@ impl Sticher {
     }
 
     #[cfg(feature = "trt")]
+    /// Set the stitcher infer host's minimum IOU value.
     pub fn set_min_iou(&self, v: f32) {
         _ = self.infer_update_send.send(InferUpdate::MinIOU(v));
     }
 
+    /// Set the stitcher infer host's minimum confidence score.
     #[cfg(feature = "trt")]
     pub fn set_min_score(&self, v: f32) {
         _ = self.infer_update_send.send(InferUpdate::MinScore(v));
@@ -188,6 +207,7 @@ impl Sticher {
 }
 
 #[cfg(feature = "trt")]
+/// Contains the information necessary to load object detectable images as an [`crate::infer_host::InferHandler`].
 pub struct InferView {
     view: ViewStyle,
     proj: ProjectionView<(Vec<u8>, Vec<u8>)>,
@@ -198,6 +218,7 @@ pub struct InferView {
 
 #[cfg(feature = "trt")]
 impl InferView {
+    /// Creates a new infer view with the given [`ViewStyle`] and pre-created [`ProjectionView`].
     pub fn new(view: ViewStyle, proj: ProjectionView<(Vec<u8>, Vec<u8>)>) -> Self {
         Self {
             view,
@@ -289,6 +310,7 @@ impl crate::infer_host::InferHandler for InferView {
     }
 }
 
+/// Stores the data that the actual stitcher task needs to run.
 struct SticherInner<B: OwnedWriteBuffer> {
     pub sender: kanal::Sender<Message>,
     pub update_chan: kanal::Receiver<StitchUpdate>,
@@ -298,8 +320,9 @@ struct SticherInner<B: OwnedWriteBuffer> {
 }
 
 impl<B: OwnedWriteBuffer + Send + 'static> SticherInner<B> {
+    /// Creates the runtime data for a sticher from the given config, primary view size and update channels.
     pub fn from_cfg(
-        cfg: &proj::Config<cam_loader::Config>,
+        cfg: &proj::Config<MaskLoaderConfig>,
         proj_size: (usize, usize),
         sender: kanal::Sender<Message>,
         update_chan: kanal::Receiver<StitchUpdate>,
@@ -310,15 +333,15 @@ impl<B: OwnedWriteBuffer + Send + 'static> SticherInner<B> {
             .map(|cfg| match cfg.clone().load() {
                 Ok(cam) => {
                     let (w, h, c) = cam.data.frame_size();
-                    tracing::info!("loaded camera {:?} ({w} * {h} * {c})", cfg.meta.mode);
+                    tracing::info!("loaded camera {:?} ({w} * {h} * {c})", cfg.meta.loader.mode);
                     cam
                 }
                 Err(err) => {
                     tracing::error!("{err}");
 
                     cfg.load_with(Loader::new_blocking(
-                        cfg.meta.resolution[0],
-                        cfg.meta.resolution[1],
+                        cfg.meta.loader.resolution[0],
+                        cfg.meta.loader.resolution[1],
                         4,
                         move |b| {
                             b.fill(255);
@@ -341,6 +364,8 @@ impl<B: OwnedWriteBuffer + Send + 'static> SticherInner<B> {
 }
 
 impl SticherInner<GpuDirectBufferWrite> {
+    /// Takes ownership of `self` and repeatedly sends generated frames until the update channels are closed, using the
+    /// provided [`GpuProjector`].
     pub async fn run(mut self, proj: &mut GpuProjector) -> stitch::Result<()> {
         let main_view = proj.create_vis_view(1280, 720, self.view_style);
 

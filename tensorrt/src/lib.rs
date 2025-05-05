@@ -1,3 +1,12 @@
+//! Safe Rust wrapper types to [TensorRT](https://docs.nvidia.com/deeplearning/tensorrt/latest/_static/c-api/index.html).
+//!
+//! Almost all of Nvidia's C++ based docs apply to this crate aswell. There are a few difference however:
+//! - Objects will be dropped automatically at the end of their scope, since
+//!   they are not pointers.
+//! - The loggers have been premade for you (since they should be classes). See [`log`].
+//! - There is some functionality that does not have safe
+//!   bindings, as they were not needed.
+
 mod cuda;
 mod log;
 mod nets;
