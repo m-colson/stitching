@@ -4,8 +4,8 @@ port = 80
 asset_dir = "/home/casa/casa-src/stitching_server/assets"
 
 [world.cylinder]
-radius = 216
-# height = 150
+radius = 70
+height = 150
 
 #-- NOTE: all coordinates are in centimeters --#
 
@@ -71,7 +71,7 @@ pos = [-5.348, -11.422, 13.626]
 pitch = 0
 azimuth = -125
 roll = 180
-sensor = { img_off = [-20,-15], fov.D = 160 }
+sensor = { img_off = [-20, -15], fov.D = 160 }
 lens = "equisolid"
 resolution = [1920, 1442]
 framerate = 21
@@ -87,7 +87,7 @@ pos = [5.348, -11.422, 13.625]
 pitch = 0
 azimuth = 125
 roll = 180
-sensor = { img_off = [-20,-15], fov.D = 160 }
+sensor = { img_off = [-20, -15], fov.D = 160 }
 lens = "equisolid"
 resolution = [1920, 1442]
 framerate = 21

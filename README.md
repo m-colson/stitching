@@ -1,29 +1,22 @@
-# Stitching
-Experimentation program for creating a 360 image from multiple cameras.
+# CASA Sticher
 
-# Prerequisites
-- [Rust Compiler](https://rustup.rs)
-- cmake
-- libclang
+This repository contains the source files and documentation of the Camera for Aerospace Situational Awareness system.
 
-## Windows
+## Viewing Documentation Book
+
+Install the Rust compiler and build system onto your local machine with [rustup](https://rustup.rs).
+
+Install [mdbook](https://rust-lang.github.io/mdBook/), which will be used to build the documentation files.
 ```sh
-winget install cmake llvm
+cargo install mdbook
 ```
 
-# Building/Running
-Run server
+Build the docs by running:
 ```sh
-cargo run -p stitching_server --release
+cd docs/casa-docs
+mdbook build
 ```
 
-Run in window
-```sh
-cargo run -p stitching_cli --release window
-```
-
-Generate GIF
-```sh
-cargo run -p stitching_cli --release gif
-```
-
+This will generate a folder at `docs/casa-docs/book` containing the files for
+the web based documentation. Open this location in your file explorer and click
+`index.html`. You should be able to click on the left links to view each section.

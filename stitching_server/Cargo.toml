@@ -6,9 +6,10 @@ edition = "2024"
 [features]
 default = []
 trt = ["dep:trt-yolo"]
-video = ["stitch/v4l", "stitch/argus"]
+v4l = ["stitch/v4l"]
+argus = ["stitch/argus"]
 image = ["cam-loader/image"]
-jetson = ["trt", "video"]
+jetson = ["trt", "v4l", "argus"]
 
 [dependencies]
 anyhow = "1.0.93"

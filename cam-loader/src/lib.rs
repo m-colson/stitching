@@ -31,11 +31,11 @@ pub enum Error {
 
     #[cfg(feature = "argus")]
     #[error(transparent)]
-    ArgusError(#[from] argus::Error),
+    ArgusError(#[from] ::argus::Error),
 
     #[cfg(feature = "image")]
     #[error(transparent)]
-    ImageError(#[from] image::error::ImageError),
+    ImageError(#[from] ::image::error::ImageError),
 
     #[error("error: {0}")]
     Other(String),

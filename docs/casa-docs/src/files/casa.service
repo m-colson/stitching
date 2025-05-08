@@ -1,0 +1,15 @@
+[Unit]
+Description=CASA Stitching Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+ExecStart=/home/casa/.cargo/bin/stitching_server -c /home/casa/casa-src/prod.toml serve
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
