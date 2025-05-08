@@ -51,6 +51,13 @@ sudo nano /etc/hostapd/hostapd.conf
 ```sh
 sudo cp casa.service /etc/systemd/system/casa.service
 ```
+- Add hostspot IP config - [download](../files/setup-hotspot-ip.sh)
+Copy the file to `/home/casa/setup-hotspot-ip.sh`, then
+```sh
+sudo crontab -e
+# Add the line
+# @reboot /home/casa/setup-hotspot-ip.sh
+```
 
 ### Change Power Mode to 20w
 This can be done by signing into the system through a plugged in display and changing the tile on the top right of the screen from 15w to 20w; then reboot.
